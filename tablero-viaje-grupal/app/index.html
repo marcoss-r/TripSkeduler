@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tablero de disponibilidad para viajes en grupo</title>
+  <meta name="description" content="Marca tu disponibilidad y deja que el tablero calcule la mejor ventana de días para el viaje del grupo.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🗓️</text></svg>">
+  <!-- La tipografía de Google Fonts se carga sin bloquear el render ni la
+       ejecución de main.js (patrón "loadCSS"): un <link rel=stylesheet>
+       normal en el <head> es render-blocking y, si el CDN va lento o está
+       bloqueado (ad-blocker, red mala, o el proxy de este entorno de
+       desarrollo), retrasa la app entera. Con media="print" el navegador
+       lo descarga en paralelo sin bloquear, y el onload lo activa. El
+       <noscript> es el fallback si JS está desactivado. -->
+  <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=IBM+Plex+Mono:wght@400;600&family=Inter:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=IBM+Plex+Mono:wght@400;600&family=Inter:wght@400;500;600&display=swap" media="print" onload="this.media='all'">
+  <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=IBM+Plex+Mono:wght@400;600&family=Inter:wght@400;500;600&display=swap"></noscript>
+  <link rel="stylesheet" href="./css/styles.css">
+</head>
+<body>
+  <div id="app"><div class="loading">Cargando…</div></div>
+  <script type="module" src="./js/main.js"></script>
+</body>
+</html>

@@ -141,7 +141,12 @@ async function deleteBoard(boardId) {
 }
 
 function listResponsesSync(boardId) {
-  return scanPrefix(`${PREFIX}board:${boardId}:resp:`).map(({ value }) => value);
+  const prefix = `${PREFIX}board:${boardId}:resp:`;
+  // El uid no se guarda dentro del valor (ya está codificado en la clave,
+  // igual que el docId de Firestore); se añade aquí para que la UI pueda
+  // distinguir "mi fila" sin depender del nombre (dos personas podrían
+  // escribir el mismo nombre).
+  return scanPrefix(prefix).map(({ key, value }) => ({ uid: key.slice(prefix.length), ...value }));
 }
 
 function subscribeResponses(boardId, cb) {

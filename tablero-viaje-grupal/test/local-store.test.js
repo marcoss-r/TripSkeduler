@@ -127,6 +127,20 @@ test('saveMyResponse + subscribeResponses: primer valor inmediato y notificació
   assert.equal(snapshots.length, 2); // tras unsubscribe, no llegan más notificaciones
 });
 
+test('subscribeResponses incluye el uid de cada fila (necesario para saber cuál es "mía")', async () => {
+  const boardId = await localStore.createBoard({
+    tripName: 'Viaje', startDate: '2026-07-01', endDate: '2026-07-10', tripLength: 3,
+  });
+  const myUid = await localStore.getMyId();
+  await localStore.saveMyResponse(boardId, { name: 'Ana', days: {} });
+
+  let responses = null;
+  localStore.subscribeResponses(boardId, (r) => (responses = r))();
+  assert.equal(responses.length, 1);
+  assert.equal(responses[0].uid, myUid);
+  assert.equal(responses[0].name, 'Ana');
+});
+
 test('deleteResponse quita solo la fila indicada', async () => {
   const boardId = await localStore.createBoard({
     tripName: 'Viaje', startDate: '2026-07-01', endDate: '2026-07-10', tripLength: 3,
