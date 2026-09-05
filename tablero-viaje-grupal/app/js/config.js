@@ -15,13 +15,13 @@
 // mientras tanto, y '?store=local' en la URL sigue forzando el backend local
 // para depurar aunque `backend` ya esté en 'firestore'.
 
-export const backend = 'local'; // cambia a 'firestore' en cuanto rellenes lo de abajo
+export const backend = 'firestore';
 
 export const firebaseConfig = {
-  apiKey: '',
-  authDomain: '',
-  projectId: '',
-  storageBucket: '',
-  messagingSenderId: '',
-  appId: '',
+  apiKey: 'AIzaSyC2saqjXGWYZ7LhvV_QKR44y7gk2sgN-SY',
+  authDomain: 'tripskeduler.firebaseapp.com',
+  projectId: 'tripskeduler',
+  storageBucket: 'tripskeduler.firebasestorage.app',
+  messagingSenderId: '680193549192',
+  appId: '1:680193549192:web:a31c80c9bdc7f72434103d',
 };
