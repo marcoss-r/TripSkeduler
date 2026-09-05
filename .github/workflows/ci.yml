@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+    paths:
+      - 'tablero-viaje-grupal/**'
+      - '.github/workflows/ci.yml'
+  pull_request:
+    paths:
+      - 'tablero-viaje-grupal/**'
+      - '.github/workflows/ci.yml'
+
+defaults:
+  run:
+    working-directory: tablero-viaje-grupal
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        tz: ['Europe/Madrid', 'America/New_York']
+    env:
+      TZ: ${{ matrix.tz }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm test
