@@ -21,8 +21,10 @@
 //
 //   createGroup({name})                        -> Promise<groupId>
 //   getGroup(groupId)                          -> Promise<group|null>
+//   updateGroup(groupId, patch)                -> Promise<void>
 //   joinGroup(groupId, {name})                 -> Promise<void>
 //   leaveGroup(groupId)                        -> Promise<void>
+//   removeMember(groupId, uid)                 -> Promise<void>
 //   subscribeMembers(groupId, cb, onError?)    -> unsubscribe()
 //   listGroupBoards(groupId)                   -> Promise<Array>
 //   listMyGroups()                             -> Promise<Array>
@@ -31,6 +33,14 @@
 // el diseño original (añadida al escribir firestore-store.js, Fase 5):
 // local-store nunca falla y lo ignora si se le pasa; con un backend real sí
 // hay errores de red/permisos que la UI necesita poder mostrar.
+//
+// `updateGroup` y `removeMember` son extensión sobre el diseño original de
+// la Fase 2 (añadida en la Fase 9): el creador del grupo puede renombrarlo
+// y expulsar a un miembro, igual que ya podía editar/borrar un tablero
+// (Fase 5). `removeMember` solo borra groups/{id}/members/{uid}; el índice
+// privado users/{uid}/groups del expulsado queda desincronizado a propósito
+// (las reglas no dejan que nadie más lo toque) — ver nota en
+// firestore-store.js.
 //
 // Dos adaptadores la implementan: local-store.js (localStorage, para
 // desarrollo sin Firebase y para depurar el multiusuario con varias

@@ -208,6 +208,20 @@ async function getGroup(groupId) {
   return readJSON(`${PREFIX}group:${groupId}`);
 }
 
+async function updateGroup(groupId, patch) {
+  const key = `${PREFIX}group:${groupId}`;
+  const current = readJSON(key);
+  if (!current) throw new Error(`El grupo ${groupId} no existe`);
+  writeJSON(key, { ...current, ...patch });
+  notify(`group:${groupId}`);
+}
+
+async function removeMember(groupId, uid) {
+  removeKey(`${PREFIX}group:${groupId}:member:${uid}`);
+  removeKey(`${PREFIX}mine:${uid}:groups:${groupId}`);
+  notify(`group:${groupId}`);
+}
+
 async function joinGroup(groupId, { name }) {
   const group = readJSON(`${PREFIX}group:${groupId}`);
   if (!group) throw new Error(`El grupo ${groupId} no existe`);
@@ -281,8 +295,10 @@ export const localStore = {
 
   createGroup,
   getGroup,
+  updateGroup,
   joinGroup,
   leaveGroup,
+  removeMember,
   subscribeMembers,
   listGroupBoards,
   listMyGroups,

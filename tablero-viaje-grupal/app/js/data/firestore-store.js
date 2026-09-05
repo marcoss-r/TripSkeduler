@@ -171,6 +171,20 @@ export async function createFirestoreStore(firebaseConfig) {
     return snap.exists() ? snap.data() : null;
   }
 
+  async function updateGroup(groupId, patch) {
+    await updateDoc(doc(db, 'groups', groupId), patch);
+  }
+
+  // Solo borra groups/{groupId}/members/{uid}. NO se toca el índice privado
+  // users/{uid}/groups del miembro expulsado: las reglas solo dejan escribir
+  // ahí a su propio dueño (me() == uid), así que el dueño del grupo no puede
+  // limpiarlo. Queda como índice desincronizado — aceptado por diseño (ver
+  // PLAN-DESARROLLO.md, sección 3): la vista de "mis grupos" del expulsado
+  // lo ignora en silencio la próxima vez que ya no pueda actuar como miembro.
+  async function removeMember(groupId, uid) {
+    await deleteDoc(doc(db, 'groups', groupId, 'members', uid));
+  }
+
   async function joinGroup(groupId, { name }) {
     const group = await getGroup(groupId);
     if (!group) throw new Error(`El grupo ${groupId} no existe`);
@@ -234,8 +248,10 @@ export async function createFirestoreStore(firebaseConfig) {
     forgetBoard,
     createGroup,
     getGroup,
+    updateGroup,
     joinGroup,
     leaveGroup,
+    removeMember,
     subscribeMembers,
     listGroupBoards,
     listMyGroups,
