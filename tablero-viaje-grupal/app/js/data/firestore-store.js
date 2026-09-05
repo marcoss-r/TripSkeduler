@@ -14,6 +14,12 @@ import {
   getAuth,
   signInAnonymously,
   onAuthStateChanged,
+  GoogleAuthProvider,
+  linkWithPopup,
+  linkWithRedirect,
+  getRedirectResult,
+  signInWithCredential,
+  signOut,
 } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js';
 import {
   initializeFirestore,
@@ -48,6 +54,35 @@ export async function createFirestoreStore(firebaseConfig) {
 
   await ensureSignedIn(auth);
 
+  // Resultado pendiente de un `linkGoogleAccount()` que cayó al fallback de
+  // `linkWithRedirect` (popup bloqueado) — ver consumeGoogleRedirectOutcome.
+  let pendingRedirectOutcome = null;
+
+  // Completa un `linkGoogleAccount()` que cayó al fallback de redirect: si
+  // el usuario volvió de Google tras un `linkWithRedirect`, aquí es donde
+  // el SDK entrega el resultado (o el error, p. ej.
+  // `credential-already-in-use`, que se resuelve igual que en el caso de
+  // popup). Si no había ningún redirect pendiente, `getRedirectResult`
+  // devuelve `null` sin más.
+  try {
+    const result = await getRedirectResult(auth);
+    if (result) {
+      pendingRedirectOutcome = { ok: true, pending: false, merged: false, displayName: result.user.displayName, email: result.user.email };
+    }
+  } catch (err) {
+    if (err.code === 'auth/credential-already-in-use') {
+      try {
+        pendingRedirectOutcome = await finishWithExistingGoogleAccount(err);
+      } catch (err2) {
+        console.error(err2);
+        pendingRedirectOutcome = { ok: false, error: err2 };
+      }
+    } else {
+      console.error(err);
+      pendingRedirectOutcome = { ok: false, error: err };
+    }
+  }
+
   function myUid() {
     return auth.currentUser.uid;
   }
@@ -74,6 +109,87 @@ export async function createFirestoreStore(firebaseConfig) {
 
   async function saveProfile({ displayName }) {
     await setDoc(doc(db, 'users', myUid()), { displayName }, { merge: true });
+  }
+
+  // --- cuenta opcional con Google (Fase 10) ------------------------------
+  //
+  // ⚠️ Igual que el resto de este fichero: escrito contra la API pública y
+  // estable del SDK, sin poder probarlo contra un login real de Google
+  // todavía (necesita un dominio autorizado en Firebase Auth — acción A5 —
+  // y ejecutarse en un navegador real, no en este entorno). Probar a mano
+  // en cuanto A5 esté hecho: vincular, cerrar y volver a abrir la app, y el
+  // caso de "esta cuenta ya está vinculada a otro dispositivo".
+  //
+  // No hay una función `signInWithGoogle`: la única entrada es
+  // `linkGoogleAccount()`, que siempre parte del usuario anónimo ya
+  // existente y usa `linkWithPopup`/`linkWithRedirect` — el uid nunca
+  // cambia salvo en el caso "feo" de la sección 1.1 del plan (la cuenta de
+  // Google ya estaba vinculada a OTRO uid), donde no queda otra que
+  // adoptar ese uid ya existente.
+
+  function getAuthInfo() {
+    const user = auth.currentUser;
+    return {
+      uid: user.uid,
+      isAnonymous: user.isAnonymous,
+      displayName: user.displayName,
+      email: user.email,
+    };
+  }
+
+  /**
+   * Intenta vincular Google al usuario anónimo actual. Devuelve:
+   *   { ok: true, pending: true }                                  -> se fue a signInWithRedirect (popup bloqueado); el resultado real llega más tarde a consumeGoogleRedirectOutcome() cuando la app vuelva a cargar
+   *   { ok: true, pending: false, merged: false, displayName, email } -> vinculado con éxito, MISMO uid de siempre
+   *   { ok: true, pending: false, merged: true, displayName, email }  -> esa cuenta de Google YA estaba vinculada a otro uid (el "caso feo" de la sección 1.1); se ha iniciado sesión con ese uid existente en su lugar. Documentado y aceptado: no se copian automáticamente las respuestas del uid anónimo anterior, la UI debe avisar.
+   *   { ok: false, cancelled: true }                                 -> el usuario cerró el popup, no es un error real
+   */
+  async function linkGoogleAccount() {
+    const provider = new GoogleAuthProvider();
+    try {
+      const result = await linkWithPopup(auth.currentUser, provider);
+      return { ok: true, pending: false, merged: false, displayName: result.user.displayName, email: result.user.email };
+    } catch (err) {
+      if (err.code === 'auth/popup-blocked') {
+        await linkWithRedirect(auth.currentUser, provider);
+        return { ok: true, pending: true };
+      }
+      if (err.code === 'auth/popup-closed-by-user' || err.code === 'auth/cancelled-popup-request') {
+        return { ok: false, cancelled: true };
+      }
+      if (err.code === 'auth/credential-already-in-use') {
+        return finishWithExistingGoogleAccount(err);
+      }
+      throw err;
+    }
+  }
+
+  async function finishWithExistingGoogleAccount(err) {
+    const cred = GoogleAuthProvider.credentialFromError(err);
+    const result = await signInWithCredential(auth, cred);
+    return { ok: true, pending: false, merged: true, displayName: result.user.displayName, email: result.user.email };
+  }
+
+  /** Cierra sesión y vuelve a un anónimo limpio (uid nuevo, sin historial). */
+  async function signOutToAnonymous() {
+    await signOut(auth);
+    await ensureSignedIn(auth);
+  }
+
+  /**
+   * `linkGoogleAccount()` puede acabar en `linkWithRedirect` (fallback si el
+   * popup está bloqueado): la página navega fuera y vuelve más tarde. El
+   * resultado de ESE intento se recoge aquí, una sola vez, la próxima vez
+   * que la app arranque — `createFirestoreStore` ya llama a
+   * `getRedirectResult` al inicializarse y guarda lo que devuelva aquí,
+   * porque en ese momento (carga de página) todavía no hay ninguna vista
+   * escuchando; se guarda en una variable de este cierre (no del módulo:
+   * cada `createFirestoreStore()` tiene la suya) hasta que algo la pida.
+   */
+  function consumeGoogleRedirectOutcome() {
+    const outcome = pendingRedirectOutcome;
+    pendingRedirectOutcome = null;
+    return outcome;
   }
 
   // --- tableros ---------------------------------------------------------
@@ -236,6 +352,10 @@ export async function createFirestoreStore(firebaseConfig) {
     getMyId,
     getProfile,
     saveProfile,
+    getAuthInfo,
+    linkGoogleAccount,
+    signOutToAnonymous,
+    consumeGoogleRedirectOutcome,
     createBoard,
     getBoard,
     updateBoard,

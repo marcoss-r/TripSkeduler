@@ -1,100 +1,153 @@
 # Tablero de disponibilidad para viajes en grupo
 
-## Qué es
+Web para que un grupo decida cuándo hacer un viaje: cada persona marca su
+disponibilidad día a día sobre un calendario y la app calcula sola cuál es
+la mejor ventana de días consecutivos para todo el grupo.
 
-Una web sencilla para que un grupo de amigos decida cuándo hacer un viaje.
-Alguien crea un "tablero" con un rango de fechas y una duración de viaje
-(p. ej. 5 días). Cada persona del grupo entra al enlace y marca, día a día,
-si ese día está **disponible**, **parcialmente disponible** o **no
-disponible**. La app calcula sola cuál es la mejor ventana de días
-consecutivos para todo el grupo.
+> El desarrollo completo de esta versión está documentado fase a fase en
+> [`PLAN-DESARROLLO.md`](./PLAN-DESARROLLO.md). Este README es el resumen
+> para quien solo quiere usar o desplegar la app; el plan es la referencia
+> técnica completa (arquitectura, modelo de datos, reglas de seguridad,
+> protocolo de trabajo).
 
-## Problema que resuelve
+## Qué hace
 
-Cuadrar fechas de viaje entre varias personas normalmente se hace a mano
-por chat ("¿del 12 al 16 os va bien? ¿y del 19?"), lo cual escala fatal a
-partir de 4-5 personas. Herramientas como When2meet o Doodle resuelven el
-"encontrar hueco común" en general, pero:
-
-- No calculan automáticamente la mejor ventana de **varios días
-  consecutivos** (solo muestran solapamiento día a día).
-- No distinguen bien entre "disponible del todo" y "podría, con esfuerzo"
-  (disponibilidad parcial), que es información valiosa para decidir.
+- **Tableros sueltos o dentro de un grupo.** Un tablero suelto es un enlace
+  de usar y tirar. Un grupo ("Los de siempre") es un enlace permanente:
+  quien ya es miembro entra a cualquier viaje nuevo del grupo con su
+  nombre ya puesto, sin volver a presentarse.
+- **4 estados de disponibilidad por día**: disponible (verde), parcial
+  (amarillo), no disponible (rojo) y no definido/sin marcar (gris, el
+  estado por defecto).
+- **Cálculo automático de la mejor ventana** de N días consecutivos
+  (duración del viaje) según la disponibilidad agregada del grupo.
+- **Identidad sin fricción, en 3 niveles**: anónimo (automático), con
+  perfil (solo escribes tu nombre una vez) y, opcionalmente, con cuenta de
+  Google para tener tus viajes en todos tus dispositivos. Nunca hace falta
+  registrarse para responder a un tablero.
+- **Tiempo real**: los cambios de cualquier participante se ven al
+  instante en el navegador de los demás.
 
 ## Cómo funciona (flujo de usuario)
 
-1. **Crear tablero**: nombre del viaje, rango de fechas a valorar (p. ej.
-   "todo julio y agosto"), duración del viaje en días (p. ej. 5).
-2. **Compartir enlace** con el grupo.
-3. Cada persona entra, escribe su nombre y marca su disponibilidad para
-   cada día del rango (clic para ciclar entre los 3 estados).
-4. La app **calcula automáticamente** la ventana de N días consecutivos
-   con mejor puntuación agregada y la resalta.
+1. Desde el inicio, **crear un viaje suelto** o **crear un grupo**.
+2. Compartir el enlace. Cada persona entra, escribe su nombre (o entra con
+   Google) y marca su disponibilidad día a día sobre el calendario
+   (clic para ciclar entre los 4 estados).
+3. La app resalta la ventana de días con mejor puntuación agregada y
+   muestra quién falta por responder (en tableros de grupo).
 
-## Modelo de datos
+## Ejecutar en local
+
+Requiere Node ≥ 20. Sin dependencias de build ni framework (HTML + CSS +
+JS vanilla con ES Modules).
+
+```bash
+npm install   # solo instala http-server, el servidor estático de desarrollo
+npm test      # corre los tests del núcleo puro (node:test)
+npm run serve # sirve app/ en http://localhost:8080
+```
+
+Por defecto la app usa el backend de Firestore configurado en
+`app/js/config.js`. Para probar sin conexión ni proyecto de Firebase, con
+todo guardado en el navegador (`localStorage`), añade `?store=local` a la
+URL: `http://localhost:8080?store=local`. Es también la forma de simular
+varias personas abriendo pestañas del mismo navegador (el propio backend
+local implementa "tiempo real" con el evento `storage`).
+
+## Desplegar
+
+La app se publica en GitHub Pages vía GitHub Actions
+(`.github/workflows/pages.yml`, publica el contenido de `app/`).
+
+1. En GitHub: **Settings → Pages → Build and deployment → Source: GitHub
+   Actions** (no "Deploy from a branch").
+2. Cualquier push a `main` que toque `tablero-viaje-grupal/app/` dispara el
+   despliegue.
+3. La URL será `https://<usuario>.github.io/<repo>/`.
+
+## Configurar Firebase
+
+La app necesita un proyecto de Firebase (Firestore + Authentication) para
+funcionar con datos reales y compartidos entre dispositivos.
+
+1. [Consola de Firebase](https://console.firebase.google.com) → crear
+   proyecto → **Firestore Database** (modo producción, región `eur3` o la
+   que prefieras — no se puede cambiar después) → **Authentication →
+   Sign-in method** → habilitar **Anónimo** y **Google**.
+2. **Configuración del proyecto → Tus aplicaciones → `</>` (Web)** → copiar
+   el objeto `firebaseConfig` y pegarlo en `app/js/config.js`, con
+   `backend: 'firestore'`. Esta config es pública por diseño (viaja en el
+   JS del navegador); la seguridad la dan las reglas de Firestore, no
+   ocultar estas claves.
+3. Publicar las reglas del repo (`firestore.rules`) en **Firestore
+   Database → Reglas** (copiar y pegar) o vía `firebase deploy --only
+   firestore:rules` con el [Firebase CLI](https://firebase.google.com/docs/cli).
+4. **Authentication → Settings → Dominios autorizados** → añadir el
+   dominio de GitHub Pages (si no, el login con Google falla en
+   producción con `auth/unauthorized-domain`; el anónimo funciona igual).
+5. (Opcional, recomendado) restringir la API key de Firebase a tu dominio
+   de Pages y a `localhost` en [Google Cloud Console → Credenciales](https://console.cloud.google.com/apis/credentials).
+
+## Modelo de datos (Firestore)
 
 ```
-Config (uno por tablero):
-  tripName: string
-  startDate: "YYYY-MM-DD"
-  endDate: "YYYY-MM-DD"
-  tripLength: number        // duración del viaje en días
+users/{uid}                          perfil privado: displayName
+users/{uid}/boards/{boardId}         índice "mis viajes"
+users/{uid}/groups/{groupId}         índice "mis grupos"
 
-Response (uno por participante):
-  name: string
-  days: { "YYYY-MM-DD": "none" | "partial" | "full" }
+groups/{groupId}                     name, ownerUid
+groups/{groupId}/members/{uid}       name, joinedAt
+
+boards/{boardId}                     tripName, startDate, endDate,
+                                      tripLength, groupId (o null), ownerUid
+boards/{boardId}/responses/{uid}     name, days: { "YYYY-MM-DD": estado }
 ```
+
+Estados de `days`: `"full"` (disponible), `"partial"`, `"unavailable"` (no
+disponible explícito) o ausente/`"none"` (no definido, el valor por
+defecto — solo se guardan los días distintos de `none`, para ahorrar
+espacio). `none` y `unavailable` puntúan igual en el algoritmo; la
+diferencia es solo de cara al usuario, para poder marcar "ya sé que no
+puedo" en vez de dejarlo en blanco.
+
+Detalle completo (por qué cada campo, límites, índices denormalizados) en
+`PLAN-DESARROLLO.md`, sección 3.
 
 ## Algoritmo de puntuación
 
-- `full` = 1 punto, `partial` = 0.5 puntos, `none` = 0 puntos.
-- Para cada día del rango, se suman los puntos de todos los participantes.
+- `full` = 1 punto, `partial` = 0.5, `unavailable`/`none` = 0.
+- Para cada día del rango se suman los puntos de todos los participantes.
 - Se recorre el rango con una ventana deslizante de `tripLength` días
   consecutivos y se elige la de mayor suma total.
 - Desempate: 1) más respuestas "disponible completo" dentro de la
-  ventana, 2) menos respuestas "no disponible".
+  ventana, 2) menos respuestas "no disponible" (`unavailable`).
 
-Esta lógica ya está implementada en JS puro dentro del prototipo
-(funciones `computeScores` y `bestWindow`) y es directamente reutilizable.
+Implementado en JS puro y testeado en `app/js/core/scoring.js` /
+`test/scoring.test.js`, junto con el resto del núcleo (`dates.js`,
+`ids.js`) libre de dependencias del DOM o de Firebase.
 
-## Prototipo incluido
+## Estructura del proyecto
 
-`prototipo/tablero-disponibilidad-viaje.html`
+```
+app/                    lo que se publica en GitHub Pages
+  js/core/              lógica pura y testeada (fechas, puntuación, ids)
+  js/data/              interfaz de almacenamiento + adaptadores
+                        (local-store.js para desarrollo, firestore-store.js
+                        para producción — mismo contrato en ambos)
+  js/ui/                vistas: inicio, crear tablero, unirse, tablero,
+                        grupo
+test/                   tests del núcleo puro (node:test, sin dependencias)
+firestore.rules         reglas de seguridad versionadas
+.github/workflows/      CI (tests) y despliegue a GitHub Pages
+```
 
-- Prototipo funcional construido como un Claude Artifact (se puede abrir
-  directamente en un navegador para ver el diseño y la interacción).
-- Usa una API `window.storage` (get/set/list/delete, con datos
-  "compartidos") propia del entorno de Artifacts de Claude.ai para
-  simular un backend en tiempo real entre varios usuarios. **Esa API no
-  existe en un navegador normal** — hay que sustituirla por un backend
-  real (ver siguiente sección).
-- Sirve como referencia completa de UI/UX, paleta de color, tipografías
-  y de la lógica de puntuación, que sí es reutilizable tal cual.
+## Prototipo histórico
 
-## Qué falta para una versión real y desplegable
-
-1. **Sustituir `window.storage` por un backend real.** Opciones, de más
-   a menos recomendada para este caso (grupo pequeño, gratis):
-   - **Firebase (Firestore)** — capa gratuita de sobra para esto,
-     tiempo real "out of the box" con `onSnapshot`.
-   - **Supabase** (Postgres) — también con capa gratuita, alternativa
-     open-source-friendly a Firebase.
-   - Alternativa más casera: una Google Sheet + Apps Script como API.
-2. **Hosting del frontend en GitHub Pages** (estático, gratis). El
-   frontend (HTML/CSS/JS del prototipo) no necesita cambios grandes de
-   estructura, solo la capa de almacenamiento.
-3. **Un tablero por URL**: usar un identificador en la URL (p. ej.
-   `?board=abc123`) o en la ruta, para poder tener varios viajes
-   distintos con la misma app desplegada, en vez de un tablero único
-   como en el prototipo.
-4. **(Opcional)** tiempo real de verdad con listeners de Firestore en
-   vez del refresco por `setInterval` que usa el prototipo.
-5. **(Opcional)** algo de validación/anti-abuso básico si el enlace va a
-   circular más allá de un grupo cerrado de confianza.
-
-## Objetivo de este proyecto
-
-Construir la versión desplegable en GitHub Pages + Firebase (o Supabase),
-reutilizando el diseño, la interacción y la lógica de puntuación del
-prototipo adjunto, sustituyendo únicamente la capa de almacenamiento por
-un backend real y añadiendo soporte para múltiples tableros por URL.
+`prototipo/tablero-disponibilidad-viaje.html` es el Claude Artifact
+original a partir del cual se diseñó esta app. Se conserva como referencia
+de la paleta, tipografías e interacción originales, pero **no es
+funcional fuera de Artifacts de Claude.ai** (depende de una API
+`window.storage` que no existe en un navegador normal) y su modelo de
+datos —un único tablero, sin grupos ni identidad— quedó sustituido por el
+descrito arriba. No se mantiene ni se actualiza.

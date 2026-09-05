@@ -8,7 +8,7 @@
 // rota simplemente se omite al listar, sin tocar el índice.
 
 import { getStore } from '../data/store.js';
-import { el, renderErrorBanner, escapeHtml, appUrl } from './components.js';
+import { el, renderErrorBanner, renderInfoBanner, escapeHtml, appUrl } from './components.js';
 
 export async function renderHome(app) {
   app.innerHTML = '';
@@ -16,6 +16,8 @@ export async function renderHome(app) {
 
   const store = await getStore();
   const profile = await store.getProfile().catch(() => null);
+  const isFirestore = store.kind === 'firestore';
+  const authInfo = isFirestore ? store.getAuthInfo() : null;
 
   const [boards, groups] = await Promise.all([loadMyBoards(store), loadMyGroups(store)]);
 
@@ -41,7 +43,7 @@ export async function renderHome(app) {
         <div class="listRows" id="groupRows"></div>
       </section>
 
-      <p class="footNote">Estos viajes se guardan en este navegador. Entra con Google para tenerlos en todos tus dispositivos (próximamente).</p>
+      <div id="accountSlot"></div>
     </div>`);
   app.innerHTML = '';
   app.appendChild(view);
@@ -52,6 +54,30 @@ export async function renderHome(app) {
   view.querySelector('#newGroupBtn').addEventListener('click', () => {
     renderCreateGroupForm(view.querySelector('#createGroupSlot'), store, profile);
   });
+
+  renderAccountSection(view.querySelector('#accountSlot'), store, { isFirestore, authInfo });
+
+  // Si el botón de Google cayó al fallback de `linkWithRedirect` (popup
+  // bloqueado) mientras se estaba en otra pantalla, el resultado real llega
+  // aquí, al volver de Google — inicio es el sitio más probable donde
+  // aterriza esa vuelta. Ver también view-join.js, que hace lo mismo por si
+  // el redirect se disparó desde la pantalla de "¿cómo te llamas?".
+  if (isFirestore) {
+    const redirectOutcome = store.consumeGoogleRedirectOutcome();
+    if (redirectOutcome && redirectOutcome.ok) {
+      view
+        .querySelector('#bannerSlot')
+        .appendChild(
+          renderInfoBanner(
+            redirectOutcome.merged
+              ? 'Esa cuenta de Google ya estaba vinculada en otro dispositivo. Has entrado con ella.'
+              : 'Cuenta de Google vinculada.'
+          )
+        );
+    } else if (redirectOutcome && !redirectOutcome.ok) {
+      view.querySelector('#bannerSlot').appendChild(renderErrorBanner('No se pudo completar la conexión con Google.'));
+    }
+  }
 
   const boardRows = view.querySelector('#boardRows');
   if (boards.length === 0) {
@@ -80,6 +106,63 @@ export async function renderHome(app) {
       );
     }
   }
+}
+
+function renderAccountSection(slot, store, { isFirestore, authInfo }) {
+  slot.innerHTML = '';
+
+  if (!isFirestore) {
+    slot.appendChild(
+      el('<p class="footNote">Estos viajes se guardan en este navegador (modo local de desarrollo).</p>')
+    );
+    return;
+  }
+
+  if (!authInfo.isAnonymous) {
+    const box = el(`<div class="panel" style="margin-top:24px;">
+      <div class="sub" style="margin:0;">Sesión iniciada con Google${authInfo.email ? `: <strong>${escapeHtml(authInfo.email)}</strong>` : ''}. Tus viajes están disponibles en todos tus dispositivos.</div>
+      <button type="button" class="ghost small" id="signOutBtn" style="align-self:flex-start;">Cerrar sesión</button>
+    </div>`);
+    box.querySelector('#signOutBtn').addEventListener('click', async () => {
+      if (!confirm('¿Cerrar sesión? Volverás a un perfil anónimo nuevo en este navegador.')) return;
+      try {
+        await store.signOutToAnonymous();
+        location.reload();
+      } catch (err) {
+        console.error(err);
+        slot.appendChild(renderErrorBanner('No se pudo cerrar sesión. Inténtalo de nuevo.'));
+      }
+    });
+    slot.appendChild(box);
+    return;
+  }
+
+  const box = el(`<div class="panel" style="margin-top:24px;">
+    <div class="sub" style="margin:0;">Estos viajes se guardan en este navegador. Entra con Google para tenerlos en todos tus dispositivos.</div>
+    <button type="button" class="ghost small" id="linkGoogleBtn" style="align-self:flex-start;">Continuar con Google</button>
+  </div>`);
+  box.querySelector('#linkGoogleBtn').addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    btn.textContent = 'Conectando con Google…';
+    try {
+      const result = await store.linkGoogleAccount();
+      if (result.pending) return; // linkWithRedirect: vuelve tras navegar a Google
+      if (result.cancelled) {
+        btn.disabled = false;
+        btn.textContent = 'Continuar con Google';
+        return;
+      }
+      if (!result.ok) throw new Error('linkGoogleAccount failed');
+      location.reload(); // uid puede haber cambiado (caso "merged"); recarga limpia mis viajes/grupos
+    } catch (err) {
+      console.error(err);
+      btn.disabled = false;
+      btn.textContent = 'Continuar con Google';
+      slot.appendChild(renderErrorBanner('No se pudo conectar con Google. Inténtalo de nuevo.'));
+    }
+  });
+  slot.appendChild(box);
 }
 
 function renderCreateGroupForm(slot, store, profile) {

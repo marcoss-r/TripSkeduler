@@ -7,6 +7,12 @@
 //   getProfile()                               -> Promise<{displayName}|null>
 //   saveProfile({displayName})                 -> Promise<void>
 //
+//   --- solo backend Firestore (Fase 10, cuenta opcional con Google) ---
+//   getAuthInfo()                    -> {uid, isAnonymous, displayName, email}
+//   linkGoogleAccount()              -> Promise<{ok, pending?, merged?, cancelled?, displayName?, email?}>
+//   signOutToAnonymous()             -> Promise<void>
+//   consumeGoogleRedirectOutcome()   -> mismo shape que linkGoogleAccount(), o null
+//
 //   createBoard(config)                        -> Promise<boardId>
 //   getBoard(boardId)                          -> Promise<config|null>
 //   updateBoard(boardId, patch)                -> Promise<void>
@@ -41,6 +47,12 @@
 // privado users/{uid}/groups del expulsado queda desincronizado a propósito
 // (las reglas no dejan que nadie más lo toque) — ver nota en
 // firestore-store.js.
+//
+// Los 4 métodos de cuenta con Google no existen en local-store: no tiene
+// sentido "vincular Google" sin un backend real. La UI comprueba
+// `store.kind === 'firestore'` antes de mostrar cualquier botón de Google o
+// de llamarlos — igual que ya hace con el aviso de "modo local" en
+// view-board.js.
 //
 // Dos adaptadores la implementan: local-store.js (localStorage, para
 // desarrollo sin Firebase y para depurar el multiusuario con varias
