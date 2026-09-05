@@ -140,7 +140,7 @@ tablero-viaje-grupal/
 │           ├── view-home.js        # "mis viajes" + "mis grupos" + crear
 │           ├── view-setup.js       # crear tablero
 │           ├── view-join.js        # nombre o Google
-│           ├── view-board.js       # rejilla + heatmap + mejor ventana
+│           ├── view-board.js       # calendario (meses/semanas) + mejor ventana
 │           ├── view-group.js       # grupo: miembros + viajes del grupo
 │           └── components.js       # el(), toasts, estados de carga/error
 ├── test/
@@ -209,7 +209,7 @@ Notas de diseño:
 - IDs: 10 caracteres de `abcdefghijkmnopqrstuvwxyz23456789` (sin caracteres
   ambiguos) generados con `crypto.getRandomValues`. **Comprueba que no existe
   antes de crear.**
-- Límites: rango ≤ 120 días, participantes ≤ 50, miembros de grupo ≤ 50,
+- Límites: rango ≤ 180 días, participantes ≤ 50, miembros de grupo ≤ 50,
   tableros por grupo ≤ 50.
 
 ---
@@ -293,7 +293,7 @@ service cloud.firestore {
           && request.resource.data.keys().hasOnly(['name','days','updatedAt'])
           && str(request.resource.data.name, 1, 40)
           && request.resource.data.days is map
-          && request.resource.data.days.size() <= 120;
+          && request.resource.data.days.size() <= 180;
 
         allow delete: if isSignedIn()
           && (me() == uid
@@ -379,8 +379,10 @@ Dos limitaciones aceptadas, documéntalas en el código:
 *Sin STOP.*
 
 - `core/dates.js`: `fmtDate` (**corregido**), `parseDate`, `addDays`,
-  `dateRangeArray` (tope 120), `weekdayShort`, `monthShort`, `dayNum`,
-  `isValidRange`.
+  `dateRangeArray` (tope 180), `weekdayShort`, `monthShort`, `dayNum`,
+  `isValidRange`, `mondayIndex` (posición L=0…D=6, para alinear un
+  calendario real) y `groupByMonth` (agrupa el rango en bloques por mes,
+  para pintar un bloque de calendario por mes en vez de una tira de días).
 - `core/scoring.js`: `computeScores` y `bestWindow` del prototipo, más
   `topWindows(dates, scores, breakdown, length, n=3)` → las N mejores ventanas
   **no solapadas** (se usa en la Fase 12; hazla ya porque el desempate es la
@@ -454,17 +456,27 @@ Solo el flujo de **tablero suelto** (sin grupos ni "mis viajes" todavía).
 - Router en `main.js`: `?b=<id>` → tablero (o "tablero no encontrado");
   sin parámetros → crear tablero.
 - `view-setup.js`: formulario del prototipo + validaciones (`endDate >=
-  startDate`, rango ≤ 120 días, `tripLength ≤` días del rango). Al crear →
+  startDate`, rango ≤ 180 días, `tripLength ≤` días del rango). Al crear →
   redirige a `?b=<id>` y muestra la **pantalla de compartir** con el enlace y
   botón "Copiar enlace".
 - `view-join.js`: pedir nombre; recordarlo en el perfil local.
-- `view-board.js`: heatmap + rejilla + caja de mejor ventana del prototipo, con
-  estas mejoras **obligatorias**:
-  - **Móvil**: por debajo de 640 px, rejilla transpuesta (una fila por día,
-    columnas = participantes) o carrusel semanal. 64 px por día con 60 días es
-    inusable en móvil.
-  - **Accesibilidad**: cada celda editable es un `<button>` real con
-    `aria-label` ("12 de julio: disponible"), no un `div` con `tabindex`.
+- `view-board.js`: **calendario real** (no una tira de casillas en fila —
+  la v1 de esta fase se hizo así y resultó ilegible pasadas 2-3 semanas e
+  inusable en móvil; se corrigió tras probarlo). Un bloque por mes, semana
+  de lunes a domingo en rejilla de 7 columnas (`core/dates.js` expone
+  `groupByMonth` y `mondayIndex` para esto). Cada casilla es a la vez la
+  edición de mi disponibilidad (color = mi estado, clic para ciclar) y un
+  vistazo al grupo (badge con la puntuación agregada, borde si cae en la
+  mejor ventana); el detalle por persona va aparte en una lista compacta
+  bajo el calendario (nombre + nº de días disponible/parcial), no en un
+  calendario por participante — eso no escala con grupos grandes ni con
+  180 días. Además:
+  - **Móvil**: no requiere un layout distinto del de escritorio — al ser
+    siempre 7 columnas, la rejilla cabe en cualquier ancho sin scroll
+    horizontal, con 5 días o con 180.
+  - **Accesibilidad**: cada casilla es un `<button>` real con `aria-label`
+    ("12 de julio: tú — disponible. Grupo: 3 completa · 1 parcial..."), no
+    un `div` con `tabindex`.
   - **Estados**: cargando, error de red, tablero vacío, guardando (optimista).
   - **Escrituras**: debounce ~400 ms para agrupar clics rápidos en un solo
     `saveMyResponse`.
@@ -833,7 +845,7 @@ Después del STOP #2, también 5–11 salvo los tres STOPs intermedios.
 | Perder el navegador = perder los viajes | Aviso explícito en la home + oferta de vincular Google |
 | Rutas absolutas rompen bajo `/TripSkeduler/` | Todo relativo; verificar en Fase 7 |
 | Escritura por clic → muchas escrituras Firestore | Debounce de 400 ms (Fase 3) |
-| Documento `days` crece sin control | Solo se guardan días ≠ `none`; tope 120 |
+| Documento `days` crece sin control | Solo se guardan días ≠ `none`; tope 180 |
 | `users/{uid}/boards` desincronizado | Es un índice, no fuente de verdad; se ignoran las entradas rotas |
 | Reglas con `exists()`/`get()` cuestan lecturas | Solo en `create` de tablero de grupo y en borrados; despreciable |
 | Colisión de ids | 10 chars sobre alfabeto de 33 → despreciable; aun así, comprobar existencia antes de crear |
