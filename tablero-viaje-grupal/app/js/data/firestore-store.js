@@ -217,6 +217,8 @@ export async function createFirestoreStore(firebaseConfig) {
   }
 
   return {
+    kind: 'firestore',
+
     getMyId,
     getProfile,
     saveProfile,

@@ -139,7 +139,9 @@ export async function renderBoard(app, board) {
       <div class="calendar"></div>
       <div class="bestBox"></div>
       <div class="roster"></div>
-      <p class="footNote">Estos datos se guardan en este navegador (modo local de desarrollo) mientras no se conecte un backend real.</p>
+      ${store.kind === 'local'
+        ? '<p class="footNote">Estos datos se guardan en este navegador (modo local de desarrollo) mientras no se conecte un backend real.</p>'
+        : ''}
     </div>`);
     app.appendChild(container);
 

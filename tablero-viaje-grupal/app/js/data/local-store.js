@@ -261,6 +261,8 @@ async function listMyGroups() {
 }
 
 export const localStore = {
+  kind: 'local',
+
   getMyId,
   getProfile,
   saveProfile,
