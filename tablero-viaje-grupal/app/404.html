@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>Redirigiendo…</title>
+  <script>
+    // GitHub Pages sirve este archivo para cualquier ruta que no exista.
+    // La app es de una sola página con estado en la query string (?b=, ?g=),
+    // así que basta con reenviar a index.html en el mismo directorio
+    // conservando query string y hash tal cual.
+    var dir = location.pathname.replace(/[^/]*$/, '');
+    location.replace(dir + 'index.html' + location.search + location.hash);
+  </script>
+</head>
+<body>
+  <noscript>
+    Esta app necesita JavaScript. <a href="./index.html">Ir al inicio</a>.
+  </noscript>
+</body>
+</html>
