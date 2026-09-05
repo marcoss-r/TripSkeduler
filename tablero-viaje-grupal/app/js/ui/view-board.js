@@ -14,11 +14,14 @@
 // (roster), porque un calendario completo por participante no escala con
 // grupos grandes ni con rangos largos.
 //
-// Las acciones de creador (editar fechas, borrar participante, borrar
-// tablero) llegan en la Fase 5, junto con el backend real.
+// Acciones de creador (Fase 5): visibles solo si `ownerUid === miUid`.
+// Editar nombre/fechas y borrar un participante reutilizan updateBoard /
+// deleteResponse de la interfaz de store; borrar el tablero pide
+// confirmación doble (dos `confirm()` con mensajes distintos) por ser
+// irreversible y afectar a todo el grupo, no solo a quien pulsa el botón.
 
 import { getStore } from '../data/store.js';
-import { dateRangeArray, monthShort, dayNum, groupByMonth, mondayIndex } from '../core/dates.js';
+import { dateRangeArray, isValidRange, MAX_RANGE_DAYS, monthShort, dayNum, groupByMonth, mondayIndex } from '../core/dates.js';
 import { computeScores, bestWindow } from '../core/scoring.js';
 import { el, debounce, renderErrorBanner } from './components.js';
 
@@ -42,14 +45,17 @@ const MONTHS_LONG_ES = [
 export async function renderBoard(app, board) {
   const store = await getStore();
   const boardId = board.boardId;
-  const dates = dateRangeArray(board.startDate, board.endDate);
+  let dates = dateRangeArray(board.startDate, board.endDate); // recalculada si el creador edita las fechas
   const myUid = await store.getMyId();
+  const isOwner = board.ownerUid === myUid;
 
   let responses = [];
   let pendingDays = null; // override optimista de mis propios días mientras el guardado está en curso
   let saving = false;
   let gotFirstSnapshot = false;
   let transientError = null;
+  let editingBoard = false;
+  let boardBusy = false; // deshabilita las acciones de creador mientras hay una escritura en curso
 
   app.innerHTML = '';
   app.appendChild(el('<div class="loading">Cargando tablero…</div>'));
@@ -109,6 +115,87 @@ export async function renderBoard(app, board) {
     scheduleSave(myResponse().name, updated);
   }
 
+  function toggleEditBoard() {
+    editingBoard = !editingBoard;
+    draw();
+  }
+
+  async function onEditBoardSubmit(e) {
+    e.preventDefault();
+    const f = e.target;
+    const tripName = f.tripName.value.trim() || board.tripName;
+    const startDate = f.startDate.value;
+    const endDate = f.endDate.value;
+
+    const rangeCheck = isValidRange(startDate, endDate);
+    if (!rangeCheck.ok) {
+      transientError =
+        rangeCheck.reason === 'end-before-start'
+          ? 'La fecha "Hasta" debe ser posterior (o igual) a "Desde".'
+          : `El rango de fechas es demasiado largo (máximo ${MAX_RANGE_DAYS} días).`;
+      draw();
+      return;
+    }
+    const newRangeLength = dateRangeArray(startDate, endDate).length;
+    if (newRangeLength < board.tripLength) {
+      transientError = `El nuevo rango (${newRangeLength} días) es más corto que la duración del viaje (${board.tripLength} días).`;
+      draw();
+      return;
+    }
+
+    boardBusy = true;
+    draw();
+    try {
+      await store.updateBoard(boardId, { tripName, startDate, endDate });
+      board.tripName = tripName;
+      board.startDate = startDate;
+      board.endDate = endDate;
+      dates = dateRangeArray(startDate, endDate);
+      transientError = null;
+      editingBoard = false;
+    } catch (err) {
+      console.error(err);
+      transientError = 'No se pudo guardar el cambio. Inténtalo de nuevo.';
+    } finally {
+      boardBusy = false;
+      draw();
+    }
+  }
+
+  async function onDeleteBoard() {
+    if (!confirm(`¿Seguro que quieres borrar "${board.tripName}"? Se perderán todas las respuestas del grupo.`)) return;
+    if (!confirm('Esta acción no se puede deshacer. ¿Borrar el tablero definitivamente?')) return;
+
+    boardBusy = true;
+    draw();
+    try {
+      await store.deleteBoard(boardId);
+      location.href = location.pathname;
+    } catch (err) {
+      console.error(err);
+      transientError = 'No se pudo borrar el tablero. Inténtalo de nuevo.';
+      boardBusy = false;
+      draw();
+    }
+  }
+
+  async function onRemoveParticipant(uid, name) {
+    if (!confirm(`¿Quitar a ${name} del tablero? Perderá su disponibilidad marcada.`)) return;
+
+    boardBusy = true;
+    draw();
+    try {
+      await store.deleteResponse(boardId, uid);
+      transientError = null;
+    } catch (err) {
+      console.error(err);
+      transientError = `No se pudo quitar a ${name}. Inténtalo de nuevo.`;
+    } finally {
+      boardBusy = false;
+      draw();
+    }
+  }
+
   function draw() {
     if (!gotFirstSnapshot) return; // se queda con el "Cargando tablero…" hasta el primer snapshot
 
@@ -128,6 +215,7 @@ export async function renderBoard(app, board) {
           <span class="savingIndicator ${saving ? 'visible' : ''}">${saving ? 'Guardando…' : ''}</span>
         </div>
       </div>
+      ${isOwner ? '<div id="ownerSlot"></div>' : ''}
       <div id="bannerSlot"></div>
       <div class="legend">
         <span><i class="dot full"></i>Disponible</span>
@@ -145,6 +233,9 @@ export async function renderBoard(app, board) {
     </div>`);
     app.appendChild(container);
 
+    if (isOwner) {
+      drawOwnerBar(container.querySelector('#ownerSlot'));
+    }
     if (transientError) {
       container.querySelector('#bannerSlot').appendChild(renderErrorBanner(transientError));
     }
@@ -157,6 +248,42 @@ export async function renderBoard(app, board) {
     drawCalendar(container.querySelector('.calendar'), { dates, scores, breakdown, best });
     drawBestBox(container.querySelector('.bestBox'), { best, responses: currentResponses });
     drawRoster(container.querySelector('.roster'), { dates, responses: currentResponses, myUid });
+  }
+
+  function drawOwnerBar(ownerSlot) {
+    if (editingBoard) {
+      const form = el(`<form class="panel ownerEditForm">
+        <label>Nombre del viaje
+          <input type="text" name="tripName" value="${escapeHtml(board.tripName)}" required maxlength="80">
+        </label>
+        <div class="row2">
+          <label>Desde<input type="date" name="startDate" value="${board.startDate}" required></label>
+          <label>Hasta<input type="date" name="endDate" value="${board.endDate}" required></label>
+        </div>
+        <div class="ownerBarActions">
+          <button type="submit" ${boardBusy ? 'disabled' : ''}>${boardBusy ? 'Guardando…' : 'Guardar cambios'}</button>
+          <button type="button" class="ghost" id="cancelEditBtn" ${boardBusy ? 'disabled' : ''}>Cancelar</button>
+        </div>
+      </form>`);
+      form.addEventListener('submit', onEditBoardSubmit);
+      form.querySelector('#cancelEditBtn').addEventListener('click', () => {
+        transientError = null;
+        toggleEditBoard();
+      });
+      ownerSlot.appendChild(form);
+      return;
+    }
+
+    const bar = el(`<div class="ownerBar">
+      <span class="ownerBarLabel">Eres el creador de este tablero</span>
+      <div class="ownerBarActions">
+        <button type="button" class="ghost small" id="editBoardBtn" ${boardBusy ? 'disabled' : ''}>Editar tablero</button>
+        <button type="button" class="ghost small danger" id="deleteBoardBtn" ${boardBusy ? 'disabled' : ''}>Borrar tablero</button>
+      </div>
+    </div>`);
+    bar.querySelector('#editBoardBtn').addEventListener('click', toggleEditBoard);
+    bar.querySelector('#deleteBoardBtn').addEventListener('click', onDeleteBoard);
+    ownerSlot.appendChild(bar);
   }
 
   function drawCalendar(calendarEl, { dates, scores, breakdown, best }) {
@@ -222,12 +349,17 @@ export async function renderBoard(app, board) {
         else if (st === 'partial') partial++;
         else if (st === 'unavailable') unavailable++;
       }
-      rosterEl.appendChild(
-        el(`<div class="rosterRow ${isMine ? 'mine' : ''}">
+      const row = el(`<div class="rosterRow ${isMine ? 'mine' : ''}">
           <span class="rosterName ${isMine ? 'mine' : ''}">${escapeHtml(r.name)}${isMine ? ' (tú)' : ''}</span>
-          <span class="rosterStats">${full} disponible${full === 1 ? '' : 's'} · ${partial} parcial${partial === 1 ? '' : 'es'} · ${unavailable} no disponible${unavailable === 1 ? '' : 's'}</span>
-        </div>`)
-      );
+          <span class="rosterRight">
+            <span class="rosterStats">${full} disponible${full === 1 ? '' : 's'} · ${partial} parcial${partial === 1 ? '' : 'es'} · ${unavailable} no disponible${unavailable === 1 ? '' : 's'}</span>
+            ${isOwner && !isMine ? '<button type="button" class="ghost small danger removeBtn">Quitar</button>' : ''}
+          </span>
+        </div>`);
+      if (isOwner && !isMine) {
+        row.querySelector('.removeBtn').addEventListener('click', () => onRemoveParticipant(r.uid, r.name));
+      }
+      rosterEl.appendChild(row);
     }
   }
 

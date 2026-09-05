@@ -105,3 +105,11 @@ button.calDay:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px
 .rosterName { font-weight: 600; }
 .rosterName.mine { color: var(--highlight); }
 .rosterStats { color: var(--ink-dim); font-family: 'IBM Plex Mono', monospace; font-size: 12px; }
+.rosterRight { display: flex; align-items: center; gap: 10px; }
+
+/* Barra y acciones de creador del tablero (Fase 5) */
+button.ghost.danger { border-color: var(--danger); color: var(--danger); }
+.ownerBar { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; background: var(--panel); border-radius: 8px; padding: 10px 16px; margin-bottom: 16px; }
+.ownerBarLabel { font-size: 12px; color: var(--ink-dim); font-family: 'IBM Plex Mono', monospace; }
+.ownerBarActions { display: flex; gap: 8px; }
+.ownerEditForm { margin-bottom: 16px; }
