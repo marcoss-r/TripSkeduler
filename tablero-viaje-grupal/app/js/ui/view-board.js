@@ -22,8 +22,17 @@ import { dateRangeArray, monthShort, dayNum, groupByMonth, mondayIndex } from '.
 import { computeScores, bestWindow } from '../core/scoring.js';
 import { el, debounce, renderErrorBanner } from './components.js';
 
-const STATUS_ORDER = ['none', 'partial', 'full'];
-const STATUS_LABEL = { none: 'No disponible', partial: 'Parcial', full: 'Disponible' };
+// Orden del ciclo al hacer clic: empieza en "no definido" (el estado por
+// defecto de un día sin marcar) y va de más a menos disponible, terminando
+// en "no disponible" explícito antes de volver a "no definido" — así se
+// puede tanto marcar un día como "des-marcarlo" del todo.
+const STATUS_ORDER = ['none', 'full', 'partial', 'unavailable'];
+const STATUS_LABEL = {
+  none: 'No definido',
+  full: 'Disponible',
+  partial: 'Parcial',
+  unavailable: 'No disponible',
+};
 const WEEKDAYS_MON_FIRST = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
 const MONTHS_LONG_ES = [
   'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
@@ -123,7 +132,8 @@ export async function renderBoard(app, board) {
       <div class="legend">
         <span><i class="dot full"></i>Disponible</span>
         <span><i class="dot partial"></i>Parcial</span>
-        <span><i class="dot none"></i>No disponible</span>
+        <span><i class="dot unavailable"></i>No disponible</span>
+        <span><i class="dot none"></i>No definido</span>
         <span>· el número bajo cada día es la puntuación del grupo</span>
       </div>
       <div class="calendar"></div>
@@ -174,7 +184,7 @@ export async function renderBoard(app, board) {
     const score = scores[day] || 0;
     const badge = totalResponses > 0 ? `${formatScore(score)}/${totalResponses}` : '';
     const bd = breakdown[day];
-    const tooltip = `${dayNum(day)} de ${MONTHS_LONG_ES[monthOf(day)]}: tú — ${STATUS_LABEL[myStatus]}. Grupo: ${bd.full} completa · ${bd.partial} parcial · ${bd.none} no disponible.`;
+    const tooltip = `${dayNum(day)} de ${MONTHS_LONG_ES[monthOf(day)]}: tú — ${STATUS_LABEL[myStatus]}. Grupo: ${bd.full} disponible · ${bd.partial} parcial · ${bd.unavailable} no disponible · ${bd.none} sin marcar.`;
     const label = `${tooltip} Toca para cambiar tu disponibilidad.`;
 
     const btn = el(
@@ -203,15 +213,17 @@ export async function renderBoard(app, board) {
       const isMine = r.uid === myUid;
       let full = 0;
       let partial = 0;
+      let unavailable = 0;
       for (const d of dates) {
         const st = (r.days && r.days[d]) || 'none';
         if (st === 'full') full++;
         else if (st === 'partial') partial++;
+        else if (st === 'unavailable') unavailable++;
       }
       rosterEl.appendChild(
         el(`<div class="rosterRow ${isMine ? 'mine' : ''}">
           <span class="rosterName ${isMine ? 'mine' : ''}">${escapeHtml(r.name)}${isMine ? ' (tú)' : ''}</span>
-          <span class="rosterStats">${full} disponible${full === 1 ? '' : 's'} · ${partial} parcial${partial === 1 ? '' : 'es'}</span>
+          <span class="rosterStats">${full} disponible${full === 1 ? '' : 's'} · ${partial} parcial${partial === 1 ? '' : 'es'} · ${unavailable} no disponible${unavailable === 1 ? '' : 's'}</span>
         </div>`)
       );
     }

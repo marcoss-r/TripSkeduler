@@ -191,7 +191,11 @@ boards/{boardId}
 
 boards/{boardId}/responses/{uid}         ← el docId ES el uid
   name:      string   (1..40)
-  days:      map      { "YYYY-MM-DD": "none" | "partial" | "full" }
+  days:      map      { "YYYY-MM-DD": "none" | "unavailable" | "partial" | "full" }
+             # none = no definido (por defecto, gris) · unavailable = no
+             # disponible explícito (rojo) · partial = amarillo · full = verde.
+             # "none" y "unavailable" puntúan igual (0); la diferencia es de
+             # cara al usuario, no del algoritmo.
   updatedAt: timestamp
 ```
 
@@ -307,7 +311,7 @@ service cloud.firestore {
 Dos limitaciones aceptadas, documéntalas en el código:
 
 1. Las reglas no validan los **valores** del mapa `days` uno a uno de forma
-   barata. El enum (`none|partial|full`) se valida en cliente. Peor caso: un
+   barata. El enum (`none|unavailable|partial|full`) se valida en cliente. Peor caso: un
    valor basura en un tablero cuyo enlace ya se compartió. Aceptable para un
    grupo cerrado.
 2. `read: if true` en grupos y tableros: **el enlace es la credencial**. Quien

@@ -4,27 +4,34 @@ import { computeScores, bestWindow, topWindows } from '../app/js/core/scoring.js
 
 const DATES = ['2026-07-01', '2026-07-02', '2026-07-03', '2026-07-04', '2026-07-05'];
 
-test('computeScores suma puntos y cuenta breakdown correctamente', () => {
+test('computeScores suma puntos y cuenta breakdown correctamente (4 estados)', () => {
   const responses = [
     { days: { '2026-07-01': 'full', '2026-07-02': 'partial' } },
-    { days: { '2026-07-01': 'full', '2026-07-02': 'none' } },
+    { days: { '2026-07-01': 'full', '2026-07-02': 'unavailable' } },
   ];
   const { scores, breakdown } = computeScores(DATES, responses);
 
   assert.equal(scores['2026-07-01'], 2); // full + full
-  assert.equal(scores['2026-07-02'], 0.5); // partial + none
-  assert.equal(scores['2026-07-03'], 0); // sin respuesta -> 'none' por defecto
+  assert.equal(scores['2026-07-02'], 0.5); // partial + unavailable(0)
+  assert.equal(scores['2026-07-03'], 0); // sin marcar -> 'none' por defecto
 
-  assert.deepEqual(breakdown['2026-07-01'], { full: 2, partial: 0, none: 0 });
-  assert.deepEqual(breakdown['2026-07-02'], { full: 0, partial: 1, none: 1 });
-  assert.deepEqual(breakdown['2026-07-03'], { full: 0, partial: 0, none: 2 });
+  assert.deepEqual(breakdown['2026-07-01'], { full: 2, partial: 0, unavailable: 0, none: 0 });
+  assert.deepEqual(breakdown['2026-07-02'], { full: 0, partial: 1, unavailable: 1, none: 0 });
+  assert.deepEqual(breakdown['2026-07-03'], { full: 0, partial: 0, unavailable: 0, none: 2 });
+});
+
+test('"none" (no definido) y "unavailable" (no disponible) puntúan igual: 0', () => {
+  const responses = [{ days: { '2026-07-01': 'unavailable' } }]; // '2026-07-02' se queda sin marcar -> 'none'
+  const { scores } = computeScores(DATES, responses);
+  assert.equal(scores['2026-07-01'], 0);
+  assert.equal(scores['2026-07-02'], 0);
 });
 
 test('computeScores con cero participantes: todas las puntuaciones a 0', () => {
   const { scores, breakdown } = computeScores(DATES, []);
   for (const d of DATES) {
     assert.equal(scores[d], 0);
-    assert.deepEqual(breakdown[d], { full: 0, partial: 0, none: 0 });
+    assert.deepEqual(breakdown[d], { full: 0, partial: 0, unavailable: 0, none: 0 });
   }
 });
 
@@ -32,8 +39,8 @@ test('bestWindow elige la ventana de mayor puntuación total', () => {
   const responses = [
     {
       days: {
-        '2026-07-01': 'none',
-        '2026-07-02': 'none',
+        '2026-07-01': 'unavailable',
+        '2026-07-02': 'unavailable',
         '2026-07-03': 'full',
         '2026-07-04': 'full',
         '2026-07-05': 'full',
@@ -48,8 +55,6 @@ test('bestWindow elige la ventana de mayor puntuación total', () => {
 });
 
 test('bestWindow desempate 1: misma suma, gana más "full"', () => {
-  // Ventana A: dos 'partial' (suma 1). Ventana B: un 'full' + un 'none' (suma 1).
-  // Con longitud 2 sobre un rango de 2 fechas para simplificar el caso.
   const dates = ['2026-07-01', '2026-07-02'];
   const responsesA = [{ days: { '2026-07-01': 'partial', '2026-07-02': 'partial' } }];
   const { scores: sA, breakdown: bA } = computeScores(dates, responsesA);
@@ -57,7 +62,7 @@ test('bestWindow desempate 1: misma suma, gana más "full"', () => {
   assert.equal(winA.sum, 1);
   assert.equal(winA.fullCount, 0);
 
-  const responsesB = [{ days: { '2026-07-01': 'full', '2026-07-02': 'none' } }];
+  const responsesB = [{ days: { '2026-07-01': 'full', '2026-07-02': 'unavailable' } }];
   const { scores: sB, breakdown: bB } = computeScores(dates, responsesB);
   const winB = bestWindow(dates, sB, bB, 2);
   assert.equal(winB.sum, 1);
@@ -65,24 +70,32 @@ test('bestWindow desempate 1: misma suma, gana más "full"', () => {
   // winB tiene más 'full' que winA con la misma suma -> ganaría en una comparación directa.
 });
 
-test('bestWindow desempate 2: misma suma, mismo fullCount, gana menos "none"', () => {
+test('bestWindow desempate 2: misma suma, mismo fullCount, gana menos "unavailable"', () => {
   const dates = ['2026-07-01', '2026-07-02', '2026-07-03', '2026-07-04'];
-  // Ventana [0,1]: full+none (sum=1, full=1, none=1)
-  // Ventana [2,3]: full+partial (sum=1.5, full=1, none=0) -> gana esta por suma mayor
-  // Ajustamos para que las sumas coincidan exactamente:
-  // [0,1]: full + none => sum=1, full=1, none=1
-  // [2,3]: partial + full => sum=1.5 -> no sirve, cambiamos a partial+partial+...
-  // Construimos un caso más directo con 2 respuestas:
   const responses = [
-    { days: { '2026-07-01': 'full', '2026-07-02': 'none', '2026-07-03': 'full', '2026-07-04': 'partial' } },
-    { days: { '2026-07-01': 'none', '2026-07-02': 'none', '2026-07-03': 'none', '2026-07-04': 'partial' } },
+    { days: { '2026-07-01': 'full', '2026-07-02': 'unavailable', '2026-07-03': 'full', '2026-07-04': 'partial' } },
+    { days: { '2026-07-01': 'unavailable', '2026-07-02': 'unavailable', '2026-07-03': 'unavailable', '2026-07-04': 'partial' } },
   ];
   const { scores, breakdown } = computeScores(dates, responses);
-  // Ventana [0,1]: full+none + none+none = sum 1, full=1, none=3
-  // Ventana [2,3]: full+partial + none+partial = sum 2, full=1, none=1
-  const winFull = bestWindow(dates, scores, breakdown, 2);
-  assert.equal(winFull.start, '2026-07-03');
-  assert.equal(winFull.sum, 2);
+  // Ventana [0,1]: full+unavailable + unavailable+unavailable = sum 1, full=1, unavailable=3
+  // Ventana [2,3]: full+partial + unavailable+partial = sum 2, full=1, unavailable=1
+  const win = bestWindow(dates, scores, breakdown, 2);
+  assert.equal(win.start, '2026-07-03');
+  assert.equal(win.sum, 2);
+});
+
+test('bestWindow: días sin marcar ("none") no penalizan el desempate, a diferencia de "unavailable"', () => {
+  const dates = ['2026-07-01', '2026-07-02'];
+  // Ventana única de longitud 2: un "full" + un "none" sin marcar.
+  const responsesNone = [{ days: { '2026-07-01': 'full' } }]; // '2026-07-02' queda 'none'
+  const { scores: sN, breakdown: bN } = computeScores(dates, responsesNone);
+  const winNone = bestWindow(dates, sN, bN, 2);
+  assert.equal(winNone.unavailableCount, 0); // 'none' no cuenta como unavailable
+
+  const responsesUnavail = [{ days: { '2026-07-01': 'full', '2026-07-02': 'unavailable' } }];
+  const { scores: sU, breakdown: bU } = computeScores(dates, responsesUnavail);
+  const winUnavail = bestWindow(dates, sU, bU, 2);
+  assert.equal(winUnavail.unavailableCount, 1);
 });
 
 test('bestWindow devuelve null si el rango es más corto que la duración', () => {
@@ -106,9 +119,9 @@ test('topWindows devuelve ventanas no solapadas ordenadas de mejor a peor', () =
     {
       days: {
         '2026-07-01': 'full', '2026-07-02': 'full', // mejor ventana de 2
-        '2026-07-03': 'none', '2026-07-04': 'none',
+        '2026-07-03': 'unavailable', '2026-07-04': 'unavailable',
         '2026-07-05': 'partial', '2026-07-06': 'partial', // segunda mejor
-        '2026-07-07': 'none', '2026-07-08': 'none',
+        '2026-07-07': 'unavailable', '2026-07-08': 'unavailable',
       },
     },
   ];

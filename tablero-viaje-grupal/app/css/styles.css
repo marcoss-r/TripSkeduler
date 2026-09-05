@@ -5,8 +5,14 @@
 :root {
   --bg: #10243B; --panel: #16314F; --tile-off: #1B2A3D;
   --ink: #F4EFE6; --ink-dim: #9FB0C3;
-  --full: #F2A93B; --partial: #4FB6A6; --none: #2B3B4E; --highlight: #E85C4A;
+  --full: #F2A93B; --none: #2B3B4E; --highlight: #E85C4A;
   --danger: #E85C4A; --ok: #4FB6A6;
+  /* Los 4 estados de disponibilidad de un día (semántica pedida: verde =
+     disponible, amarillo = parcial, rojo = no disponible explícito, gris =
+     no definido/sin marcar). Son variables separadas de --full (que sigue
+     siendo el color de acento general de botones/enlaces) precisamente
+     para no arrastrar ese cambio de color a toda la UI. */
+  --status-full: #4CAF6D; --status-partial: #F2C94C; --status-unavailable: #DC3B3B;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; background: var(--bg); color: var(--ink); font-family: 'Inter', sans-serif; }
@@ -30,7 +36,7 @@ button.ghost.small { font-size: 13px; padding: 8px 14px; margin-top: 8px; }
 .boardHeader { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 16px; flex-wrap: wrap; }
 .legend { display: flex; gap: 16px; margin-bottom: 16px; font-size: 13px; color: var(--ink-dim); align-items: center; flex-wrap: wrap; }
 .dot { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
-.dot.full { background: var(--full); } .dot.partial { background: var(--partial); } .dot.none { background: var(--none); border: 1px solid rgba(255,255,255,0.15); }
+.dot.full { background: var(--status-full); } .dot.partial { background: var(--status-partial); } .dot.unavailable { background: var(--status-unavailable); } .dot.none { background: var(--none); border: 1px solid rgba(255,255,255,0.15); }
 .bestBox { background: var(--panel); border: 1px solid var(--highlight); border-radius: 10px; padding: 20px 24px; margin-top: 20px; }
 .bestDates { font-family: 'Big Shoulders Display', sans-serif; font-weight: 900; font-size: 32px; color: var(--highlight); }
 .bestMeta { color: var(--ink-dim); font-size: 13px; margin-top: 4px; }
@@ -80,8 +86,9 @@ button.ghost.small { font-size: 13px; padding: 8px 14px; margin-top: 8px; }
 button.calDay { font-weight: normal; cursor: pointer; width: 100%; }
 button.calDay:hover { transform: translateY(-2px); }
 button.calDay:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
-.calDay.full { background: var(--full); color: #241601; }
-.calDay.partial { background: var(--partial); color: #062521; }
+.calDay.full { background: var(--status-full); color: #0B2B16; }
+.calDay.partial { background: var(--status-partial); color: #2A1D00; }
+.calDay.unavailable { background: var(--status-unavailable); color: var(--ink); }
 .calDay.inBest { outline: 2px solid var(--highlight); outline-offset: 2px; }
 .calDayNum { font-size: 13px; font-weight: 600; line-height: 1; }
 .calDayBadge { font-size: 10px; font-family: 'IBM Plex Mono', monospace; opacity: .85; line-height: 1; }
