@@ -1,0 +1,314 @@
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=IBM+Plex+Mono:wght@400;600&family=Inter:wght@400;500;600&display=swap">
+<style>
+  :root{
+    --bg:#10243B; --panel:#16314F; --tile-off:#1B2A3D;
+    --ink:#F4EFE6; --ink-dim:#9FB0C3;
+    --full:#F2A93B; --partial:#4FB6A6; --none:#2B3B4E; --highlight:#E85C4A;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);font-family:'Inter',sans-serif;}
+  #app{min-height:100%;}
+  .wrap{max-width:720px;margin:0 auto;padding:48px 24px;}
+  .wrap.wide{max-width:960px;}
+  .eyebrow{font-family:'IBM Plex Mono',monospace;letter-spacing:0.08em;font-size:12px;color:var(--ink-dim);margin-bottom:8px;}
+  h1{font-family:'Big Shoulders Display',sans-serif;font-weight:900;font-size:44px;line-height:1.02;margin:0 0 16px;letter-spacing:-0.01em;animation:rise .5s ease both;}
+  .sub{color:var(--ink-dim);line-height:1.5;margin-bottom:28px;max-width:520px;}
+  .panel{background:var(--panel);border-radius:10px;padding:24px;display:flex;flex-direction:column;gap:16px;border:1px solid rgba(255,255,255,0.06);}
+  label{display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--ink-dim);}
+  input{background:var(--bg);border:1px solid rgba(255,255,255,0.12);border-radius:6px;padding:10px 12px;color:var(--ink);font-family:'Inter';font-size:15px;}
+  input:focus-visible{outline:2px solid var(--full);outline-offset:1px;}
+  .row2{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+  button{background:var(--full);color:#241601;border:none;border-radius:6px;padding:12px 18px;font-weight:700;font-size:15px;cursor:pointer;font-family:'Inter';}
+  button:hover{filter:brightness(1.05);}
+  button:focus-visible{outline:2px solid var(--ink);outline-offset:2px;}
+  button.ghost{background:transparent;color:var(--ink-dim);border:1px solid rgba(255,255,255,0.15);font-weight:500;}
+  button.ghost.small{font-size:13px;padding:8px 14px;margin-top:8px;}
+  .boardHeader{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:16px;flex-wrap:wrap;}
+  .legend{display:flex;gap:16px;margin-bottom:16px;font-size:13px;color:var(--ink-dim);align-items:center;flex-wrap:wrap;}
+  .dot{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:middle;}
+  .dot.full{background:var(--full);} .dot.partial{background:var(--partial);} .dot.none{background:var(--none);border:1px solid rgba(255,255,255,0.15);}
+  .scrollx{overflow-x:auto;padding-bottom:8px;}
+  .grid,.heat{display:grid;gap:6px;align-items:center;margin-bottom:4px;}
+  .tile{width:64px;height:56px;display:flex;flex-direction:column;align-items:center;justify-content:center;border-radius:6px;font-family:'IBM Plex Mono',monospace;font-size:12px;background:var(--none);border:1px solid rgba(255,255,255,0.06);color:var(--ink-dim);transition:transform .12s ease;}
+  .tile.editable{cursor:pointer;}
+  .tile.editable:hover{transform:translateY(-2px);}
+  .tile.editable:focus-visible{outline:2px solid var(--ink);outline-offset:2px;}
+  .tile.head{background:transparent;border:none;color:var(--ink-dim);font-weight:600;height:auto;font-family:'Inter';font-size:12px;}
+  .tile.full{background:var(--full);color:#241601;}
+  .tile.partial{background:var(--partial);color:#062521;}
+  .tile.none{background:var(--none);color:var(--ink-dim);}
+  .tile.heatTile.inBest{outline:2px solid var(--highlight);outline-offset:2px;}
+  .rowLabel{font-weight:600;padding-right:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .rowLabel.mine{color:var(--highlight);}
+  .rowLabel.head{color:var(--ink-dim);font-weight:500;}
+  .bestBox{background:var(--panel);border:1px solid var(--highlight);border-radius:10px;padding:20px 24px;margin-top:20px;}
+  .bestDates{font-family:'Big Shoulders Display',sans-serif;font-weight:900;font-size:32px;color:var(--highlight);}
+  .bestMeta{color:var(--ink-dim);font-size:13px;margin-top:4px;}
+  .loading{padding:48px;text-align:center;color:var(--ink-dim);font-family:'IBM Plex Mono',monospace;}
+  .wd{font-size:10px;opacity:.7;} .dn{font-size:16px;font-weight:600;}
+  .footNote{font-size:12px;color:var(--ink-dim);margin-top:20px;}
+  .resetLink{color:var(--ink-dim);font-size:12px;text-decoration:underline;cursor:pointer;display:inline-block;margin-top:6px;}
+  @keyframes rise{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:translateY(0);}}
+  @media (max-width:480px){ h1{font-size:32px;} .row2{grid-template-columns:1fr;} }
+</style>
+
+<div id="app"></div>
+
+<script>
+(function(){
+  const app = document.getElementById('app');
+  const SCORE = { none:0, partial:0.5, full:1 };
+  const STATUS_LABEL = { none:'No disponible', partial:'Parcial', full:'Disponible' };
+  let currentName = null;
+
+  function fmtDate(d){ return d.toISOString().slice(0,10); }
+  function parseDate(s){ const [y,m,day]=s.split('-').map(Number); return new Date(y, m-1, day); }
+  function addDays(d,n){ const r=new Date(d); r.setDate(r.getDate()+n); return r; }
+  function dateRangeArray(startStr,endStr){
+    const start=parseDate(startStr), end=parseDate(endStr);
+    const arr=[]; let cur=start;
+    while(cur<=end && arr.length<120){ arr.push(fmtDate(cur)); cur=addDays(cur,1); }
+    return arr;
+  }
+  const WD=['DOM','LUN','MAR','MIÉ','JUE','VIE','SÁB'];
+  const MO=['ENE','FEB','MAR','ABR','MAY','JUN','JUL','AGO','SEP','OCT','NOV','DIC'];
+  function weekdayShort(d){ return WD[parseDate(d).getDay()]; }
+  function dayNum(d){ return parseDate(d).getDate(); }
+  function monthShort(d){ return MO[parseDate(d).getMonth()]; }
+  function hexToRgb(hex){ hex=hex.replace('#',''); const n=parseInt(hex,16); return [n>>16&255,n>>8&255,n&255]; }
+  function lerpColor(a,b,t){ const A=hexToRgb(a),B=hexToRgb(b); const r=Math.round(A[0]+(B[0]-A[0])*t),g=Math.round(A[1]+(B[1]-A[1])*t),bl=Math.round(A[2]+(B[2]-A[2])*t); return `rgb(${r},${g},${bl})`; }
+  function el(html){ const t=document.createElement('template'); t.innerHTML=html.trim(); return t.content.firstChild; }
+
+  async function getConfig(){
+    try{ const r=await window.storage.get('config', true); return r?JSON.parse(r.value):null; }
+    catch(e){ return null; }
+  }
+  async function setConfig(cfg){
+    try{ await window.storage.set('config', JSON.stringify(cfg), true); }catch(e){ alert('No se pudo guardar el tablero. Inténtalo de nuevo.'); }
+  }
+  async function listResponses(){
+    try{
+      const r = await window.storage.list('resp:', true);
+      if(!r || !r.keys) return [];
+      const out=[];
+      for(const k of r.keys){
+        try{ const v=await window.storage.get(k, true); if(v) out.push(JSON.parse(v.value)); }catch(e){}
+      }
+      return out;
+    }catch(e){ return []; }
+  }
+  async function saveResponse(resp){
+    const key='resp:'+encodeURIComponent(resp.name);
+    try{ await window.storage.set(key, JSON.stringify(resp), true); }catch(e){ alert('No se pudo guardar tu disponibilidad.'); }
+  }
+
+  function computeScores(dates,responses){
+    const scores={}, breakdown={};
+    for(const d of dates){ scores[d]=0; breakdown[d]={full:0,partial:0,none:0}; }
+    for(const r of responses){
+      for(const d of dates){
+        const st=(r.days && r.days[d]) || 'none';
+        scores[d]+=SCORE[st];
+        breakdown[d][st]++;
+      }
+    }
+    return {scores,breakdown};
+  }
+  function bestWindow(dates,scores,breakdown,length){
+    if(dates.length<length) return null;
+    let best=null;
+    for(let i=0;i+length<=dates.length;i++){
+      const slice=dates.slice(i,i+length);
+      let sum=0,fullCount=0,noneCount=0;
+      for(const d of slice){ sum+=scores[d]; fullCount+=breakdown[d].full; noneCount+=breakdown[d].none; }
+      const cand={start:slice[0],end:slice[slice.length-1],sum,fullCount,noneCount};
+      if(!best || cand.sum>best.sum || (cand.sum===best.sum && cand.fullCount>best.fullCount) || (cand.sum===best.sum && cand.fullCount===best.fullCount && cand.noneCount<best.noneCount)){ best=cand; }
+    }
+    return best;
+  }
+
+  async function render(){
+    app.innerHTML='<div class="loading">Cargando tablero…</div>';
+    const cfg=await getConfig();
+    if(!cfg){ renderSetup(); return; }
+    if(!currentName){ renderJoin(cfg); return; }
+    renderBoard(cfg);
+  }
+
+  function renderSetup(){
+    app.innerHTML='';
+    const today=fmtDate(new Date());
+    const in45=fmtDate(addDays(new Date(),45));
+    app.appendChild(el(`
+      <div class="wrap">
+        <div class="eyebrow">TABLERO DE SALIDAS</div>
+        <h1>¿Cuándo hacemos<br>el viaje?</h1>
+        <p class="sub">Define una ventana de fechas, compártela con tu grupo y que cada uno marque su disponibilidad. El tablero calcula solo los mejores días.</p>
+        <form id="setupForm" class="panel">
+          <label>Nombre del viaje
+            <input type="text" name="tripName" placeholder="Escapada a Lisboa" required>
+          </label>
+          <div class="row2">
+            <label>Desde<input type="date" name="startDate" value="${today}" required></label>
+            <label>Hasta<input type="date" name="endDate" value="${in45}" required></label>
+          </div>
+          <label>Duración del viaje (días)
+            <input type="number" name="tripLength" min="1" max="30" value="5" required>
+          </label>
+          <button type="submit">Crear tablero</button>
+        </form>
+      </div>`));
+    document.getElementById('setupForm').addEventListener('submit', async (e)=>{
+      e.preventDefault();
+      const f=e.target;
+      const cfg={
+        tripName: f.tripName.value.trim() || 'Viaje en grupo',
+        startDate: f.startDate.value,
+        endDate: f.endDate.value,
+        tripLength: Math.max(1, parseInt(f.tripLength.value,10)||5)
+      };
+      if(parseDate(cfg.endDate) < parseDate(cfg.startDate)){ alert('La fecha "Hasta" debe ser posterior a "Desde".'); return; }
+      await setConfig(cfg);
+      render();
+    });
+  }
+
+  function renderJoin(cfg){
+    app.innerHTML='';
+    app.appendChild(el(`
+      <div class="wrap">
+        <div class="eyebrow">${cfg.tripName.toUpperCase()}</div>
+        <h1>¿Cómo te llamas?</h1>
+        <p class="sub">Tu nombre aparecerá en el tablero para que el grupo vea tu disponibilidad.</p>
+        <form id="joinForm" class="panel">
+          <label>Tu nombre<input type="text" name="name" placeholder="Ana" required></label>
+          <button type="submit">Entrar al tablero</button>
+        </form>
+      </div>`));
+    document.getElementById('joinForm').addEventListener('submit', async (e)=>{
+      e.preventDefault();
+      const name=e.target.name.value.trim();
+      if(!name) return;
+      currentName=name;
+      const responses=await listResponses();
+      let mine=responses.find(r=>r.name===name);
+      if(!mine){ mine={name,days:{}}; await saveResponse(mine); }
+      render();
+    });
+  }
+
+  let refreshTimer=null;
+
+  async function renderBoard(cfg){
+    if(refreshTimer) clearInterval(refreshTimer);
+    const dates=dateRangeArray(cfg.startDate,cfg.endDate);
+    let responses=await listResponses();
+    let mine=responses.find(r=>r.name===currentName);
+    if(!mine){ mine={name:currentName,days:{}}; responses.push(mine); }
+
+    function draw(){
+      const {scores,breakdown}=computeScores(dates,responses);
+      const best=bestWindow(dates,scores,breakdown,cfg.tripLength);
+      const maxScore=Math.max(1, ...dates.map(d=>scores[d]));
+
+      app.innerHTML='';
+      const container=el(`<div class="wrap wide">
+        <div class="boardHeader">
+          <div>
+            <div class="eyebrow">${cfg.tripName.toUpperCase()}</div>
+            <h1>Tablero de disponibilidad</h1>
+          </div>
+          <button class="ghost" id="switchName">Eres ${currentName} · cambiar</button>
+        </div>
+        <div class="legend">
+          <span><i class="dot full"></i>Disponible</span>
+          <span><i class="dot partial"></i>Parcial</span>
+          <span><i class="dot none"></i>No disponible</span>
+        </div>
+        <div class="scrollx">
+          <div class="heat"></div>
+          <div class="grid"></div>
+        </div>
+        <div class="bestBox">
+          ${best ? `
+            <div class="eyebrow">MEJOR VENTANA · ${cfg.tripLength} DÍAS</div>
+            <div class="bestDates">${monthShort(best.start)} ${dayNum(best.start)} — ${monthShort(best.end)} ${dayNum(best.end)}</div>
+            <div class="bestMeta">Puntuación ${best.sum.toFixed(1)} de ${(cfg.tripLength*responses.length).toFixed(1)} máx. · ${best.fullCount} disponibilidades completas</div>
+          ` : `<p class="sub">El rango de fechas es más corto que la duración del viaje.</p>`}
+        </div>
+        <button class="ghost small" id="refreshBtn">Actualizar respuestas</button>
+        <div class="footNote">Estos datos se guardan mientras este artifact esté publicado y son visibles para quien tenga el enlace.<br>
+          <a class="resetLink" id="resetLink" href="#">Restablecer tablero</a>
+        </div>
+      </div>`);
+      app.appendChild(container);
+
+      const heat=container.querySelector('.heat');
+      heat.appendChild(el(`<div class="rowLabel">Total</div>`));
+      for(const d of dates){
+        const inBest=best && d>=best.start && d<=best.end;
+        const bg=lerpColor('#1B2A3D','#F2A93B', scores[d]/maxScore);
+        const tile=el(`<div class="tile heatTile ${inBest?'inBest':''}" style="background:${bg}" title="${breakdown[d].full} completa · ${breakdown[d].partial} parcial · ${breakdown[d].none} no disponible"><span class="wd">${weekdayShort(d)}</span><span class="dn">${dayNum(d)}</span></div>`);
+        heat.appendChild(tile);
+      }
+
+      const grid=container.querySelector('.grid');
+      grid.appendChild(el(`<div class="rowLabel head">Fecha</div>`));
+      for(const d of dates){ grid.appendChild(el(`<div class="tile head">${monthShort(d)} ${dayNum(d)}</div>`)); }
+      for(const r of responses){
+        const isMine=r.name===currentName;
+        grid.appendChild(el(`<div class="rowLabel ${isMine?'mine':''}">${r.name}${isMine?' (tú)':''}</div>`));
+        for(const d of dates){
+          const st=(r.days && r.days[d]) || 'none';
+          const editable=isMine;
+          const t=el(`<div class="tile ${st} ${editable?'editable':''}" title="${STATUS_LABEL[st]}" ${editable?'tabindex="0"':''}></div>`);
+          if(editable){
+            const cycle=async ()=>{
+              const order=['none','partial','full'];
+              const cur=(mine.days[d])||'none';
+              const next=order[(order.indexOf(cur)+1)%order.length];
+              mine.days[d]=next;
+              await saveResponse(mine);
+              responses=responses.map(rr=>rr.name===mine.name?mine:rr);
+              draw();
+            };
+            t.addEventListener('click', cycle);
+            t.addEventListener('keydown', (e)=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); cycle(); } });
+          }
+          grid.appendChild(t);
+        }
+      }
+
+      container.querySelector('#switchName').addEventListener('click', ()=>{ currentName=null; render(); });
+      container.querySelector('#refreshBtn').addEventListener('click', async ()=>{
+        responses=await listResponses();
+        mine=responses.find(rr=>rr.name===currentName) || mine;
+        draw();
+      });
+      container.querySelector('#resetLink').addEventListener('click', async (e)=>{
+        e.preventDefault();
+        if(!confirm('¿Borrar todos los datos de este tablero? No se puede deshacer.')) return;
+        try{
+          await window.storage.delete('config', true);
+          const keys=await window.storage.list('resp:', true);
+          if(keys && keys.keys){ for(const k of keys.keys){ await window.storage.delete(k, true); } }
+        }catch(err){}
+        currentName=null;
+        render();
+      });
+
+      grid.style.gridTemplateColumns=`140px repeat(${dates.length}, 64px)`;
+      heat.style.gridTemplateColumns=`140px repeat(${dates.length}, 64px)`;
+    }
+
+    draw();
+    refreshTimer=setInterval(async ()=>{
+      responses=await listResponses();
+      mine=responses.find(rr=>rr.name===currentName) || mine;
+      draw();
+    }, 8000);
+  }
+
+  render();
+})();
+</script>
