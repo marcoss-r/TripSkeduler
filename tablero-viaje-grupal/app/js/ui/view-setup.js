@@ -1,21 +1,26 @@
-// Vista de creación de tablero (sin grupo — Fase 9 añadirá "crear dentro
-// de un grupo"). Formulario tomado del prototipo, con validaciones y
-// pantalla de "compartir enlace" al terminar.
+// Vista de creación de tablero: suelto (desde el inicio) o dentro de un
+// grupo (Fase 9, `?g=<id>&crear=1` — `group` llega con `{groupId, name}`).
+// Formulario tomado del prototipo, con validaciones y pantalla de
+// "compartir enlace" al terminar.
 
 import { getStore } from '../data/store.js';
-import { el, renderErrorBanner } from './components.js';
+import { el, renderErrorBanner, appUrl } from './components.js';
 import { fmtDate, addDays, isValidRange, dateRangeArray, MAX_RANGE_DAYS } from '../core/dates.js';
 
-export function renderSetup(app) {
+export function renderSetup(app, { group } = {}) {
   app.innerHTML = '';
   const today = fmtDate(new Date());
   const in45 = fmtDate(addDays(new Date(), 45));
 
   const view = el(`
     <div class="wrap">
-      <div class="eyebrow">TABLERO DE SALIDAS</div>
-      <h1>¿Cuándo hacemos<br>el viaje?</h1>
-      <p class="sub">Define una ventana de fechas, compártela con tu grupo y que cada uno marque su disponibilidad. El tablero calcula solo los mejores días.</p>
+      <div class="eyebrow">${group ? `GRUPO · ${escapeForTitle(group.name).toUpperCase()}` : 'TABLERO DE SALIDAS'}</div>
+      <h1>${group ? 'Nuevo viaje<br>del grupo' : '¿Cuándo hacemos<br>el viaje?'}</h1>
+      <p class="sub">${
+        group
+          ? `Cada miembro de "${escapeForTitle(group.name)}" aparecerá en este tablero con el nombre que ya tiene en el grupo.`
+          : 'Define una ventana de fechas, compártela con tu grupo y que cada uno marque su disponibilidad. El tablero calcula solo los mejores días.'
+      }</p>
       <div id="formSlot"></div>
     </div>`);
   app.appendChild(view);
@@ -71,9 +76,11 @@ export function renderSetup(app) {
 
       try {
         const store = await getStore();
-        const boardId = await store.createBoard({ tripName, startDate, endDate, tripLength });
-        history.replaceState(null, '', `?b=${boardId}`);
-        renderShareScreen(view, { boardId, tripName });
+        const groupId = group ? group.groupId : null;
+        const boardId = await store.createBoard({ tripName, startDate, endDate, tripLength, groupId });
+        await store.rememberBoard(boardId, { tripName, groupId, role: 'owner' });
+        history.replaceState(null, '', appUrl(`b=${boardId}`));
+        renderShareScreen(view, { boardId, tripName, group });
       } catch (err) {
         submitBtn.disabled = false;
         submitBtn.textContent = 'Crear tablero';
@@ -97,18 +104,23 @@ function rangeReasonMessage(reason) {
   }
 }
 
-function renderShareScreen(view, { boardId, tripName }) {
+function renderShareScreen(view, { boardId, tripName, group }) {
   const url = `${location.origin}${location.pathname}?b=${boardId}`;
   view.innerHTML = `
     <div class="eyebrow">TABLERO CREADO</div>
     <h1>${escapeForTitle(tripName)}</h1>
-    <p class="sub">Comparte este enlace con tu grupo. Cada persona lo abre y marca su disponibilidad.</p>
+    <p class="sub">${
+      group
+        ? `Ya aparece en los viajes de "${escapeForTitle(group.name)}". Cada miembro lo verá con su nombre ya puesto.`
+        : 'Comparte este enlace con tu grupo. Cada persona lo abre y marca su disponibilidad.'
+    }</p>
     <div class="panel">
       <div class="shareBox">
         <input type="text" id="shareUrl" readonly value="${url}">
         <button type="button" id="copyBtn">Copiar enlace</button>
       </div>
       <button type="button" id="continueBtn" class="ghost">Ir al tablero</button>
+      ${group ? `<a href="${appUrl(`g=${group.groupId}`)}" class="ghost small" style="text-align:center;">← Volver al grupo</a>` : ''}
     </div>`;
 
   view.querySelector('#copyBtn').addEventListener('click', async () => {

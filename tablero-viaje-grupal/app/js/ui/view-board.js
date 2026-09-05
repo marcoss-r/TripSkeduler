@@ -23,7 +23,7 @@
 import { getStore } from '../data/store.js';
 import { dateRangeArray, isValidRange, MAX_RANGE_DAYS, monthShort, dayNum, groupByMonth, mondayIndex } from '../core/dates.js';
 import { computeScores, bestWindow } from '../core/scoring.js';
-import { el, debounce, renderErrorBanner } from './components.js';
+import { el, debounce, renderErrorBanner, appUrl } from './components.js';
 
 // Orden del ciclo al hacer clic: empieza en "no definido" (el estado por
 // defecto de un día sin marcar) y va de más a menos disponible, terminando
@@ -50,6 +50,7 @@ export async function renderBoard(app, board) {
   const isOwner = board.ownerUid === myUid;
 
   let responses = [];
+  let groupMembers = null; // solo si board.groupId; sirve para "quién falta por responder" (Fase 9)
   let pendingDays = null; // override optimista de mis propios días mientras el guardado está en curso
   let saving = false;
   let gotFirstSnapshot = false;
@@ -96,6 +97,12 @@ export async function renderBoard(app, board) {
     gotFirstSnapshot = true;
     draw();
   });
+  const unsubscribeMembers = board.groupId
+    ? store.subscribeMembers(board.groupId, (m) => {
+        groupMembers = m;
+        draw();
+      })
+    : null;
 
   // Si el router vuelve a renderizar el tablero sobre el mismo #app (no
   // debería pasar en el flujo normal de main.js, pero es una salvaguarda
@@ -103,7 +110,10 @@ export async function renderBoard(app, board) {
   // nueva.
   const previousCleanup = app._viewBoardCleanup;
   if (previousCleanup) previousCleanup();
-  app._viewBoardCleanup = () => unsubscribe();
+  app._viewBoardCleanup = () => {
+    unsubscribe();
+    if (unsubscribeMembers) unsubscribeMembers();
+  };
 
   function onCycle(day) {
     const order = STATUS_ORDER;
@@ -170,7 +180,7 @@ export async function renderBoard(app, board) {
     draw();
     try {
       await store.deleteBoard(boardId);
-      location.href = location.pathname;
+      location.href = appUrl();
     } catch (err) {
       console.error(err);
       transientError = 'No se pudo borrar el tablero. Inténtalo de nuevo.';
@@ -205,6 +215,10 @@ export async function renderBoard(app, board) {
 
     app.innerHTML = '';
     const container = el(`<div class="wrap wide">
+      <div class="boardNav">
+        <a href="${appUrl()}">← Mis viajes</a>
+        ${board.groupId ? `<a href="${appUrl(`g=${encodeURIComponent(board.groupId)}`)}">← Grupo</a>` : ''}
+      </div>
       <div class="boardHeader">
         <div>
           <div class="eyebrow">${escapeHtml(board.tripName.toUpperCase())}</div>
@@ -217,6 +231,7 @@ export async function renderBoard(app, board) {
       </div>
       ${isOwner ? '<div id="ownerSlot"></div>' : ''}
       <div id="bannerSlot"></div>
+      <div id="pendingSlot"></div>
       <div class="legend">
         <span><i class="dot full"></i>Disponible</span>
         <span><i class="dot partial"></i>Parcial</span>
@@ -243,6 +258,19 @@ export async function renderBoard(app, board) {
       container
         .querySelector('#bannerSlot')
         .appendChild(el('<div class="banner info">Aún no hay ninguna respuesta en este tablero.</div>'));
+    }
+
+    if (board.groupId && groupMembers) {
+      const missing = groupMembers.filter((m) => !currentResponses.some((r) => r.uid === m.uid));
+      if (missing.length > 0) {
+        container
+          .querySelector('#pendingSlot')
+          .appendChild(
+            el(
+              `<div class="banner info">Pendientes de responder: ${missing.map((m) => escapeHtml(m.name)).join(', ')}.</div>`
+            )
+          );
+      }
     }
 
     drawCalendar(container.querySelector('.calendar'), { dates, scores, breakdown, best });

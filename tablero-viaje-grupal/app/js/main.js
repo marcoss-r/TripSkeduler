@@ -1,31 +1,45 @@
 // Bootstrap + router.
 //
-// Fase 3: solo el flujo de tablero suelto.
-//   - sin ?b=          -> crear tablero
-//   - ?b=<id> inválido -> "tablero no encontrado"
-//   - ?b=<id> válido, sin respuesta propia -> pedir nombre
-//   - ?b=<id> válido, con respuesta propia -> tablero
-//
-// Las Fases 8-9 añadirán ?g=<groupId> y la pantalla de inicio ("mis
-// viajes" / "mis grupos"); el router se ampliará entonces.
+//   sin parámetros        -> inicio ("mis viajes" / "mis grupos")
+//   ?crear=1               -> crear tablero suelto
+//   ?g=<id>&crear=1         -> crear tablero dentro de ese grupo
+//   ?g=<id>                -> pantalla de grupo (unirse si no soy miembro)
+//   ?b=<id> inválido       -> "tablero no encontrado"
+//   ?b=<id> válido, grupo, ya soy miembro del grupo, sin fila -> auto-entra
+//     con mi nombre de grupo, sin pantalla de "¿cómo te llamas?"
+//   ?b=<id> válido, sin fila -> pedir nombre
+//   ?b=<id> válido, con fila -> tablero
 
 import { getStore } from './data/store.js';
 import { renderSetup } from './ui/view-setup.js';
 import { renderJoin } from './ui/view-join.js';
 import { renderBoard } from './ui/view-board.js';
-import { renderLoading, el } from './ui/components.js';
+import { renderHome } from './ui/view-home.js';
+import { renderGroup } from './ui/view-group.js';
+import { renderLoading, renderMessageScreen, appUrl } from './ui/components.js';
 
 const app = document.getElementById('app');
 
 async function main() {
   const params = new URLSearchParams(location.search);
   const boardId = params.get('b');
+  const groupId = params.get('g');
+  const creating = params.get('crear') === '1';
 
-  if (!boardId) {
+  if (boardId) {
+    await handleBoard(boardId);
+  } else if (groupId && creating) {
+    await handleCreateGroupBoard(groupId);
+  } else if (groupId) {
+    await renderGroup(app, groupId);
+  } else if (creating) {
     renderSetup(app);
-    return;
+  } else {
+    await renderHome(app);
   }
+}
 
+async function handleBoard(boardId) {
   renderLoading(app, 'Cargando tablero…');
 
   const store = await getStore();
@@ -34,70 +48,139 @@ async function main() {
     board = await store.getBoard(boardId);
   } catch (err) {
     console.error(err);
-    renderNotFound(app, { networkError: true });
+    renderBoardNotFound({ networkError: true });
     return;
   }
 
   if (!board) {
-    renderNotFound(app, { networkError: false });
+    renderBoardNotFound({ networkError: false });
     return;
   }
   board = { ...board, boardId };
 
   const myUid = await store.getMyId();
-  const responses = await getResponsesOnce(store, boardId);
+  const responses = await once((cb) => store.subscribeResponses(boardId, cb));
   const alreadyJoined = responses.some((r) => r.uid === myUid);
 
   if (alreadyJoined) {
     renderBoard(app, board);
-  } else {
-    renderJoin(app, board, { onJoined: () => renderBoard(app, board) });
+    return;
   }
+
+  // Tablero de grupo + ya soy miembro de ese grupo -> me uno directamente
+  // con mi nombre de grupo, sin pasar por la pantalla de "¿cómo te llamas?"
+  // (Fase 9: "el segundo viaje del grupo es un clic").
+  if (board.groupId) {
+    const group = await store.getGroup(board.groupId).catch(() => null);
+    if (group) {
+      const members = await once((cb) => store.subscribeMembers(board.groupId, cb));
+      const myMembership = members.find((m) => m.uid === myUid);
+      if (myMembership) {
+        try {
+          await store.saveMyResponse(boardId, { name: myMembership.name, days: {} });
+          await store.rememberBoard(boardId, {
+            tripName: board.tripName,
+            groupId: board.groupId,
+            role: 'participant',
+          });
+        } catch (err) {
+          console.error(err);
+        }
+        renderBoard(app, board);
+        return;
+      }
+    }
+  }
+
+  renderJoin(app, board, {
+    onJoined: async (name) => {
+      try {
+        await store.rememberBoard(boardId, {
+          tripName: board.tripName,
+          groupId: board.groupId,
+          role: 'participant',
+        });
+      } catch (err) {
+        console.error(err);
+      }
+      renderBoard(app, board);
+    },
+  });
 }
 
-function getResponsesOnce(store, boardId) {
-  // ⚠️ local-store.js emite el primer valor de forma SÍNCRONA dentro de
-  // subscribeResponses (antes de que la llamada devuelva la función
-  // `unsubscribe`), así que no se puede referenciar `unsubscribe` dentro
-  // del propio callback de esa primera llamada (temporal dead zone /
-  // "is not a function" según el caso). Se aplaza la desuscripción a un
-  // microtask, momento en el que la asignación ya se ha completado; esto
-  // también es válido para un backend que emita de forma asíncrona
-  // (Firestore's onSnapshot, Fase 5).
+async function handleCreateGroupBoard(groupId) {
+  renderLoading(app, 'Cargando grupo…');
+  const store = await getStore();
+  let group = null;
+  try {
+    group = await store.getGroup(groupId);
+  } catch (err) {
+    console.error(err);
+    renderMessageScreen(app, {
+      eyebrow: 'ERROR DE CONEXIÓN',
+      title: 'No se pudo cargar el grupo',
+      message: 'Revisa tu conexión e inténtalo de nuevo.',
+      linkHref: appUrl(),
+      linkLabel: 'Ir al inicio',
+    });
+    return;
+  }
+  if (!group) {
+    renderGroupNotFound();
+    return;
+  }
+  renderSetup(app, { group: { ...group, groupId } });
+}
+
+/** once(subscribe) espera el primer valor de un subscribe*(cb) -> unsubscribe() y se desuscribe.
+ *  ⚠️ tanto local-store (síncrono) como firestore-store (onSnapshot, asíncrono) emiten el primer
+ *  valor DESPUÉS de que se registre el callback pero potencialmente antes de que `subscribe(...)`
+ *  termine de devolver la función unsubscribe, así que no se puede referenciar `unsubscribe` dentro
+ *  del propio callback de esa primera llamada. Se aplaza la desuscripción a un microtask. */
+function once(subscribe) {
   return new Promise((resolve) => {
     let settled = false;
     let unsubscribe = () => {};
-    unsubscribe = store.subscribeResponses(boardId, (responses) => {
+    unsubscribe = subscribe((value) => {
       if (settled) return;
       settled = true;
-      resolve(responses);
+      resolve(value);
       queueMicrotask(() => unsubscribe());
     });
   });
 }
 
-function renderNotFound(app, { networkError }) {
-  app.innerHTML = '';
-  app.appendChild(
-    el(`
-    <div class="wrap">
-      <div class="notFoundBox panel">
-        <div class="eyebrow">${networkError ? 'ERROR DE CONEXIÓN' : 'TABLERO NO ENCONTRADO'}</div>
-        <h1 style="font-size:28px;">${networkError ? 'No se pudo cargar el tablero' : 'Este enlace no existe'}</h1>
-        <p class="sub" style="margin:0 auto;">${
-          networkError
-            ? 'Revisa tu conexión e inténtalo de nuevo.'
-            : 'Puede que el enlace esté mal copiado o que el tablero se haya borrado.'
-        }</p>
-        <a href="${location.pathname}" style="display:inline-block;margin-top:16px;">Crear un tablero nuevo</a>
-      </div>
-    </div>`)
-  );
+function renderBoardNotFound({ networkError }) {
+  renderMessageScreen(app, {
+    eyebrow: networkError ? 'ERROR DE CONEXIÓN' : 'TABLERO NO ENCONTRADO',
+    title: networkError ? 'No se pudo cargar el tablero' : 'Este enlace no existe',
+    message: networkError
+      ? 'Revisa tu conexión e inténtalo de nuevo.'
+      : 'Puede que el enlace esté mal copiado o que el tablero se haya borrado.',
+    linkHref: location.pathname,
+    linkLabel: 'Ir al inicio',
+  });
+}
+
+function renderGroupNotFound() {
+  renderMessageScreen(app, {
+    eyebrow: 'GRUPO NO ENCONTRADO',
+    title: 'Este enlace no existe',
+    message: 'Puede que el enlace esté mal copiado.',
+    linkHref: location.pathname,
+    linkLabel: 'Ir al inicio',
+  });
 }
 
 window.addEventListener('popstate', () => location.reload());
 
 main().catch((err) => {
   console.error(err);
-  renderNotFound(app, { networkError: true });
+  renderMessageScreen(app, {
+    eyebrow: 'ERROR DE CONEXIÓN',
+    title: 'No se pudo cargar la app',
+    message: 'Revisa tu conexión e inténtalo de nuevo.',
+    linkHref: location.pathname,
+    linkLabel: 'Ir al inicio',
+  });
 });

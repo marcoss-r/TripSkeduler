@@ -113,3 +113,24 @@ button.ghost.danger { border-color: var(--danger); color: var(--danger); }
 .ownerBarLabel { font-size: 12px; color: var(--ink-dim); font-family: 'IBM Plex Mono', monospace; }
 .ownerBarActions { display: flex; gap: 8px; }
 .ownerEditForm { margin-bottom: 16px; }
+
+/* ================== INICIO / GRUPOS (Fases 8-9) ================== */
+
+.boardNav { display: flex; gap: 16px; margin-bottom: 20px; font-size: 13px; }
+.boardNav a { color: var(--ink-dim); text-decoration: none; }
+.boardNav a:hover { color: var(--ink); text-decoration: underline; }
+
+.homeActions { display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
+
+.listSection { margin-top: 32px; }
+.listSection h2 { font-family: 'Big Shoulders Display', sans-serif; font-weight: 900; font-size: 22px; margin: 0 0 12px; }
+.listRows { display: flex; flex-direction: column; gap: 8px; }
+.listRow {
+  display: flex; justify-content: space-between; align-items: center; gap: 12px;
+  background: var(--panel); border-radius: 8px; padding: 12px 16px;
+  text-decoration: none; color: var(--ink); border: 1px solid rgba(255,255,255,0.06);
+}
+.listRow:hover { border-color: var(--full); }
+.listRowTitle { font-weight: 600; }
+.listRowMeta { color: var(--ink-dim); font-size: 12px; font-family: 'IBM Plex Mono', monospace; white-space: nowrap; }
+.emptyState { color: var(--ink-dim); font-size: 13px; }
