@@ -4,7 +4,7 @@
 
 import { getStore } from '../data/store.js';
 import { el, renderErrorBanner } from './components.js';
-import { fmtDate, addDays, isValidRange, dateRangeArray } from '../core/dates.js';
+import { fmtDate, addDays, isValidRange, dateRangeArray, MAX_RANGE_DAYS } from '../core/dates.js';
 
 export function renderSetup(app) {
   app.innerHTML = '';
@@ -91,7 +91,7 @@ function rangeReasonMessage(reason) {
     case 'end-before-start':
       return 'La fecha "Hasta" debe ser posterior (o igual) a "Desde".';
     case 'range-too-long':
-      return 'El rango de fechas es demasiado largo (máximo 120 días).';
+      return `El rango de fechas es demasiado largo (máximo ${MAX_RANGE_DAYS} días).`;
     default:
       return 'Revisa las fechas introducidas.';
   }

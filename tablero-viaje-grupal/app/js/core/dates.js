@@ -6,7 +6,7 @@
 // local — nunca con toISOString(), que convierte a UTC y puede desplazar
 // el día (ver PLAN-DESARROLLO.md, sección "Bug conocido").
 
-const MAX_RANGE_DAYS = 120;
+const MAX_RANGE_DAYS = 180;
 
 const WEEKDAYS_SHORT = ['DOM', 'LUN', 'MAR', 'MIÉ', 'JUE', 'VIE', 'SÁB'];
 const MONTHS_SHORT = [
@@ -65,6 +65,40 @@ export function dayNum(dateStr) {
 
 export function monthShort(dateStr) {
   return MONTHS_SHORT[parseDate(dateStr).getMonth()];
+}
+
+/**
+ * Posición del día en una semana que empieza en lunes: 0=lunes … 6=domingo.
+ * (Date.getDay() devuelve 0=domingo…6=sábado, que no sirve para dibujar un
+ * calendario con semanas L-D como es habitual en España.)
+ */
+export function mondayIndex(dateStr) {
+  return (parseDate(dateStr).getDay() + 6) % 7;
+}
+
+/**
+ * Agrupa un array de fechas "YYYY-MM-DD" (se asume ordenado y contiguo,
+ * como el que devuelve dateRangeArray) en bloques por mes calendario, para
+ * dibujar un calendario real (un bloque de mes por grupo) en vez de una
+ * única tira de días.
+ *
+ * @returns {Array<{year:number, month:number, dates:string[]}>}
+ *   `month` es 0-indexado (0=enero), como Date#getMonth().
+ */
+export function groupByMonth(dates) {
+  const groups = [];
+  for (const d of dates) {
+    const date = parseDate(d);
+    const year = date.getFullYear();
+    const month = date.getMonth();
+    const last = groups[groups.length - 1];
+    if (last && last.year === year && last.month === month) {
+      last.dates.push(d);
+    } else {
+      groups.push({ year, month, dates: [d] });
+    }
+  }
+  return groups;
 }
 
 /**

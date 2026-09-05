@@ -1,21 +1,34 @@
-// Vista del tablero: heatmap + rejilla de disponibilidad + mejor ventana.
+// Vista del tablero: calendario + mejor ventana + lista de participantes.
 //
-// Basada en el prototipo, con las mejoras obligatorias de la Fase 3:
-//   - rejilla transpuesta en móvil (filas = días, columnas = participantes)
-//   - celdas editables como <button> reales con aria-label
-//   - estados de carga / error / vacío / guardando
-//   - debounce de 400ms en las escrituras
+// v2 (tras feedback): la v1 mostraba una única tira horizontal de casillas
+// de 64px, una por día — ilegible en cuanto el rango pasaba de 2-3 semanas
+// y directamente inusable en móvil. Se sustituye por un calendario real:
+// un bloque por mes, semanas de lunes a domingo en una rejilla de 7
+// columnas. Al ser siempre 7 columnas, cabe en cualquier ancho de pantalla
+// sin scroll horizontal, tanto con 5 días como con 180 (el máximo).
+//
+// Cada casilla del calendario es a la vez la superficie de edición de MI
+// disponibilidad (color = mi estado, clic para ciclar) y un vistazo rápido
+// al grupo (badge con la puntuación agregada, borde si cae en la mejor
+// ventana). El detalle por persona se ofrece aparte en una lista compacta
+// (roster), porque un calendario completo por participante no escala con
+// grupos grandes ni con rangos largos.
 //
 // Las acciones de creador (editar fechas, borrar participante, borrar
 // tablero) llegan en la Fase 5, junto con el backend real.
 
 import { getStore } from '../data/store.js';
-import { dateRangeArray, weekdayShort, monthShort, dayNum } from '../core/dates.js';
+import { dateRangeArray, monthShort, dayNum, groupByMonth, mondayIndex } from '../core/dates.js';
 import { computeScores, bestWindow } from '../core/scoring.js';
-import { el, debounce, isMobileViewport, renderErrorBanner } from './components.js';
+import { el, debounce, renderErrorBanner } from './components.js';
 
 const STATUS_ORDER = ['none', 'partial', 'full'];
 const STATUS_LABEL = { none: 'No disponible', partial: 'Parcial', full: 'Disponible' };
+const WEEKDAYS_MON_FIRST = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
+const MONTHS_LONG_ES = [
+  'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
+  'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',
+];
 
 export async function renderBoard(app, board) {
   const store = getStore();
@@ -30,8 +43,7 @@ export async function renderBoard(app, board) {
   let transientError = null;
 
   app.innerHTML = '';
-  const loadingNode = el('<div class="loading">Cargando tablero…</div>');
-  app.appendChild(loadingNode);
+  app.appendChild(el('<div class="loading">Cargando tablero…</div>'));
 
   const scheduleSave = debounce(async (name, days) => {
     saving = true;
@@ -57,12 +69,12 @@ export async function renderBoard(app, board) {
     return pendingDays ?? myResponse().days ?? {};
   }
 
-  let resizeTimer = null;
-  function onResize() {
-    clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(draw, 150);
+  function effectiveResponses() {
+    if (pendingDays === null) return responses;
+    const mine = responses.find((r) => r.uid === myUid);
+    if (!mine) return responses;
+    return responses.map((r) => (r.uid === myUid ? { ...r, days: pendingDays } : r));
   }
-  window.addEventListener('resize', onResize);
 
   const unsubscribe = store.subscribeResponses(boardId, (r) => {
     responses = r;
@@ -72,22 +84,28 @@ export async function renderBoard(app, board) {
 
   // Si el router vuelve a renderizar el tablero sobre el mismo #app (no
   // debería pasar en el flujo normal de main.js, pero es una salvaguarda
-  // barata), se limpia la suscripción y el listener de 'resize' anteriores
-  // antes de dejar activos los nuevos.
+  // barata), se limpia la suscripción anterior antes de dejar activa la
+  // nueva.
   const previousCleanup = app._viewBoardCleanup;
   if (previousCleanup) previousCleanup();
-  app._viewBoardCleanup = () => {
-    window.removeEventListener('resize', onResize);
-    unsubscribe();
-  };
+  app._viewBoardCleanup = () => unsubscribe();
+
+  function onCycle(day) {
+    const order = STATUS_ORDER;
+    const current = myDays()[day] || 'none';
+    const next = order[(order.indexOf(current) + 1) % order.length];
+    const updated = { ...myDays(), [day]: next };
+    pendingDays = updated;
+    draw();
+    scheduleSave(myResponse().name, updated);
+  }
 
   function draw() {
     if (!gotFirstSnapshot) return; // se queda con el "Cargando tablero…" hasta el primer snapshot
 
-    const { scores, breakdown } = computeScores(dates, mergeMine(responses));
+    const currentResponses = effectiveResponses();
+    const { scores, breakdown } = computeScores(dates, currentResponses);
     const best = bestWindow(dates, scores, breakdown, board.tripLength);
-    const maxScore = Math.max(1, ...dates.map((d) => scores[d]));
-    const transposed = isMobileViewport();
 
     app.innerHTML = '';
     const container = el(`<div class="wrap wide">
@@ -106,12 +124,11 @@ export async function renderBoard(app, board) {
         <span><i class="dot full"></i>Disponible</span>
         <span><i class="dot partial"></i>Parcial</span>
         <span><i class="dot none"></i>No disponible</span>
+        <span>· el número bajo cada día es la puntuación del grupo</span>
       </div>
-      <div class="scrollx">
-        <div class="heat ${transposed ? 'transposed' : ''}"></div>
-        <div class="grid ${transposed ? 'transposed' : ''}"></div>
-      </div>
+      <div class="calendar"></div>
       <div class="bestBox"></div>
+      <div class="roster"></div>
       <p class="footNote">Estos datos se guardan en este navegador (modo local de desarrollo) mientras no se conecte un backend real.</p>
     </div>`);
     app.appendChild(container);
@@ -125,121 +142,79 @@ export async function renderBoard(app, board) {
         .appendChild(el('<div class="banner info">Aún no hay ninguna respuesta en este tablero.</div>'));
     }
 
-    const bestBox = container.querySelector('.bestBox');
+    drawCalendar(container.querySelector('.calendar'), { dates, scores, breakdown, best });
+    drawBestBox(container.querySelector('.bestBox'), { best, responses: currentResponses });
+    drawRoster(container.querySelector('.roster'), { dates, responses: currentResponses, myUid });
+  }
+
+  function drawCalendar(calendarEl, { dates, scores, breakdown, best }) {
+    const totalResponses = effectiveResponses().length;
+    for (const { year, month, dates: monthDates } of groupByMonth(dates)) {
+      const monthBlock = el(`<div class="calMonth">
+        <div class="calMonthTitle">${MONTHS_LONG_ES[month].toUpperCase()} ${year}</div>
+        <div class="calWeekdays">${WEEKDAYS_MON_FIRST.map((w) => `<span>${w}</span>`).join('')}</div>
+        <div class="calDays"></div>
+      </div>`);
+      calendarEl.appendChild(monthBlock);
+
+      const daysEl = monthBlock.querySelector('.calDays');
+      const leadingEmpty = mondayIndex(monthDates[0]);
+      for (let i = 0; i < leadingEmpty; i++) {
+        daysEl.appendChild(el('<div class="calDay empty"></div>'));
+      }
+      for (const d of monthDates) {
+        daysEl.appendChild(makeDayCell(d, { scores, breakdown, best, totalResponses }));
+      }
+    }
+  }
+
+  function makeDayCell(day, { scores, breakdown, best, totalResponses }) {
+    const myStatus = myDays()[day] || 'none';
+    const inBest = best && day >= best.start && day <= best.end;
+    const score = scores[day] || 0;
+    const badge = totalResponses > 0 ? `${formatScore(score)}/${totalResponses}` : '';
+    const bd = breakdown[day];
+    const tooltip = `${dayNum(day)} de ${MONTHS_LONG_ES[monthOf(day)]}: tú — ${STATUS_LABEL[myStatus]}. Grupo: ${bd.full} completa · ${bd.partial} parcial · ${bd.none} no disponible.`;
+    const label = `${tooltip} Toca para cambiar tu disponibilidad.`;
+
+    const btn = el(
+      `<button type="button" class="calDay ${myStatus} ${inBest ? 'inBest' : ''}" title="${escapeHtml(tooltip)}" aria-label="${escapeHtml(label)}">
+        <span class="calDayNum">${dayNum(day)}</span>
+        ${badge ? `<span class="calDayBadge">${badge}</span>` : ''}
+      </button>`
+    );
+    btn.addEventListener('click', () => onCycle(day));
+    return btn;
+  }
+
+  function drawBestBox(bestBox, { best, responses: currentResponses }) {
     if (best) {
       bestBox.innerHTML = `
         <div class="eyebrow">MEJOR VENTANA · ${board.tripLength} DÍAS</div>
         <div class="bestDates">${monthShort(best.start)} ${dayNum(best.start)} — ${monthShort(best.end)} ${dayNum(best.end)}</div>
-        <div class="bestMeta">Puntuación ${best.sum.toFixed(1)} de ${(board.tripLength * mergeMine(responses).length).toFixed(1)} máx. · ${best.fullCount} disponibilidades completas</div>`;
+        <div class="bestMeta">Puntuación ${formatScore(best.sum)} de ${board.tripLength * currentResponses.length} máx. · ${best.fullCount} disponibilidades completas</div>`;
     } else {
       bestBox.innerHTML = `<p class="sub" style="margin:0;">El rango de fechas es más corto que la duración del viaje.</p>`;
     }
-
-    if (transposed) {
-      drawTransposed(container, { dates, responses: mergeMine(responses), scores, breakdown, best, maxScore });
-    } else {
-      drawStandard(container, { dates, responses: mergeMine(responses), scores, breakdown, best, maxScore });
-    }
   }
 
-  function mergeMine(list) {
-    if (pendingDays === null) return list;
-    const mine = list.find((r) => r.uid === myUid);
-    if (!mine) return list;
-    return list.map((r) => (r.uid === myUid ? { ...r, days: pendingDays } : r));
-  }
-
-  function onCycle(day) {
-    const order = STATUS_ORDER;
-    const current = myDays()[day] || 'none';
-    const next = order[(order.indexOf(current) + 1) % order.length];
-    const updated = { ...myDays(), [day]: next };
-    pendingDays = updated;
-    draw();
-    scheduleSave(myResponse().name, updated);
-  }
-
-  function drawStandard(container, { dates, responses, scores, breakdown, best, maxScore }) {
-    const heat = container.querySelector('.heat');
-    const grid = container.querySelector('.grid');
-
-    heat.appendChild(el('<div class="rowLabel">Total</div>'));
-    for (const d of dates) {
-      const inBest = best && d >= best.start && d <= best.end;
-      const bg = lerpColor('#1B2A3D', '#F2A93B', scores[d] / maxScore);
-      const title = `${breakdown[d].full} completa · ${breakdown[d].partial} parcial · ${breakdown[d].none} no disponible`;
-      heat.appendChild(
-        el(
-          `<div class="tile heatTile ${inBest ? 'inBest' : ''}" style="background:${bg}" title="${title}"><span class="wd">${weekdayShort(d)}</span><span class="dn">${dayNum(d)}</span></div>`
-        )
-      );
-    }
-
-    grid.appendChild(el('<div class="rowLabel head">Fecha</div>'));
-    for (const d of dates) {
-      grid.appendChild(el(`<div class="tile head">${monthShort(d)} ${dayNum(d)}</div>`));
-    }
-
-    for (const r of responses) {
+  function drawRoster(rosterEl, { dates, responses: currentResponses, myUid }) {
+    for (const r of currentResponses) {
       const isMine = r.uid === myUid;
-      grid.appendChild(
-        el(`<div class="rowLabel ${isMine ? 'mine' : ''}">${escapeHtml(r.name)}${isMine ? ' (tú)' : ''}</div>`)
-      );
+      let full = 0;
+      let partial = 0;
       for (const d of dates) {
-        grid.appendChild(makeCell(r, d, isMine));
+        const st = (r.days && r.days[d]) || 'none';
+        if (st === 'full') full++;
+        else if (st === 'partial') partial++;
       }
-    }
-
-    grid.style.gridTemplateColumns = `140px repeat(${dates.length}, 64px)`;
-    heat.style.gridTemplateColumns = `140px repeat(${dates.length}, 64px)`;
-  }
-
-  function drawTransposed(container, { dates, responses, scores, breakdown, best, maxScore }) {
-    // Filas = días, columnas = participantes. Pensado para móvil: con un
-    // grupo pequeño (pocos participantes) y un rango largo, esto evita el
-    // scroll horizontal de 64px por día, que es inusable en pantallas
-    // estrechas con 60+ días.
-    const heat = container.querySelector('.heat');
-    const grid = container.querySelector('.grid');
-    heat.remove(); // el heatmap de "total" no aporta tanto en la vista transpuesta; se omite
-
-    grid.appendChild(el('<div class="rowLabel head">Fecha</div>'));
-    for (const r of responses) {
-      const isMine = r.uid === myUid;
-      grid.appendChild(
-        el(
-          `<div class="tile head participantHead ${isMine ? 'mine' : ''}" title="${escapeHtml(r.name)}">${escapeHtml(r.name)}${isMine ? ' (tú)' : ''}</div>`
-        )
+      rosterEl.appendChild(
+        el(`<div class="rosterRow ${isMine ? 'mine' : ''}">
+          <span class="rosterName ${isMine ? 'mine' : ''}">${escapeHtml(r.name)}${isMine ? ' (tú)' : ''}</span>
+          <span class="rosterStats">${full} disponible${full === 1 ? '' : 's'} · ${partial} parcial${partial === 1 ? '' : 'es'}</span>
+        </div>`)
       );
     }
-
-    for (const d of dates) {
-      const inBest = best && d >= best.start && d <= best.end;
-      grid.appendChild(
-        el(
-          `<div class="rowLabel ${inBest ? 'mine' : ''}">${weekdayShort(d)} ${dayNum(d)} ${monthShort(d)}</div>`
-        )
-      );
-      for (const r of responses) {
-        const isMine = r.uid === myUid;
-        grid.appendChild(makeCell(r, d, isMine));
-      }
-    }
-
-    grid.style.gridTemplateColumns = `90px repeat(${responses.length}, minmax(56px, 1fr))`;
-  }
-
-  function makeCell(r, day, isMine) {
-    const st = (r.days && r.days[day]) || 'none';
-    const label = `${dayNum(day)} de ${monthLongEs(day)}: ${STATUS_LABEL[st]}`;
-    if (!isMine) {
-      return el(`<div class="tile ${st}" title="${STATUS_LABEL[st]}" aria-label="${label}"></div>`);
-    }
-    const btn = el(
-      `<button type="button" class="tile ${st} editable" aria-label="${label}, toca para cambiar" title="${STATUS_LABEL[st]}"></button>`
-    );
-    btn.addEventListener('click', () => onCycle(day));
-    return btn;
   }
 
   draw();
@@ -247,28 +222,13 @@ export async function renderBoard(app, board) {
 
 // --- utilidades locales de esta vista ---------------------------------------
 
-function hexToRgb(hex) {
-  hex = hex.replace('#', '');
-  const n = parseInt(hex, 16);
-  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+function monthOf(dateStr) {
+  return Number(dateStr.split('-')[1]) - 1;
 }
 
-function lerpColor(a, b, t) {
-  const A = hexToRgb(a);
-  const B = hexToRgb(b);
-  const r = Math.round(A[0] + (B[0] - A[0]) * t);
-  const g = Math.round(A[1] + (B[1] - A[1]) * t);
-  const bl = Math.round(A[2] + (B[2] - A[2]) * t);
-  return `rgb(${r},${g},${bl})`;
-}
-
-const MONTHS_LONG_ES = [
-  'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
-  'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',
-];
-function monthLongEs(dateStr) {
-  const [, m] = dateStr.split('-').map(Number);
-  return MONTHS_LONG_ES[m - 1];
+/** Formatea una puntuación (puede tener .5) sin decimales sobrantes: 3 en vez de 3.0, 3.5 tal cual. */
+function formatScore(n) {
+  return Number.isInteger(n) ? String(n) : n.toFixed(1);
 }
 
 function escapeHtml(s) {
