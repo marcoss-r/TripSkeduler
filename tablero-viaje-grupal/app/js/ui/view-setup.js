@@ -70,7 +70,7 @@ export function renderSetup(app) {
       submitBtn.textContent = 'Creando…';
 
       try {
-        const store = getStore();
+        const store = await getStore();
         const boardId = await store.createBoard({ tripName, startDate, endDate, tripLength });
         history.replaceState(null, '', `?b=${boardId}`);
         renderShareScreen(view, { boardId, tripName });

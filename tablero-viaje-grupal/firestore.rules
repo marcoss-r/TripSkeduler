@@ -1,0 +1,88 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() { return request.auth != null; }
+    function me() { return request.auth.uid; }
+    function str(v, min, max) {
+      return v is string && v.size() >= min && v.size() <= max;
+    }
+    function isDate(v) {
+      return v is string && v.matches('^\\d{4}-\\d{2}-\\d{2}$');
+    }
+    function isGroupMember(groupId) {
+      return exists(/databases/$(database)/documents/groups/$(groupId)/members/$(me()));
+    }
+    function isGroupOwner(groupId) {
+      return get(/databases/$(database)/documents/groups/$(groupId)).data.ownerUid == me();
+    }
+
+    // --- Perfil privado e índices "mis viajes" / "mis grupos" ---------------
+    match /users/{uid} {
+      allow read, write: if isSignedIn() && me() == uid;
+      match /boards/{boardId} {
+        allow read, write: if isSignedIn() && me() == uid;
+      }
+      match /groups/{groupId} {
+        allow read, write: if isSignedIn() && me() == uid;
+      }
+    }
+
+    // --- Grupos ------------------------------------------------------------
+    match /groups/{groupId} {
+      allow read: if true;                       // el id no es adivinable
+
+      allow create: if isSignedIn()
+        && request.resource.data.keys().hasOnly(['name','ownerUid','createdAt'])
+        && str(request.resource.data.name, 1, 60)
+        && request.resource.data.ownerUid == me();
+
+      allow update, delete: if isSignedIn() && resource.data.ownerUid == me();
+
+      match /members/{uid} {
+        allow read: if true;
+        allow write: if isSignedIn()
+          && me() == uid
+          && request.resource.data.keys().hasOnly(['name','joinedAt'])
+          && str(request.resource.data.name, 1, 40);
+        allow delete: if isSignedIn() && (me() == uid || isGroupOwner(groupId));
+      }
+    }
+
+    // --- Tableros ----------------------------------------------------------
+    match /boards/{boardId} {
+      allow read: if true;
+
+      allow create: if isSignedIn()
+        && request.resource.data.keys().hasOnly(
+             ['tripName','startDate','endDate','tripLength','groupId','ownerUid','createdAt'])
+        && str(request.resource.data.tripName, 1, 80)
+        && isDate(request.resource.data.startDate)
+        && isDate(request.resource.data.endDate)
+        && request.resource.data.startDate <= request.resource.data.endDate
+        && request.resource.data.tripLength is int
+        && request.resource.data.tripLength >= 1
+        && request.resource.data.tripLength <= 30
+        && request.resource.data.ownerUid == me()
+        && (request.resource.data.groupId == null
+            || isGroupMember(request.resource.data.groupId));
+
+      allow update, delete: if isSignedIn() && resource.data.ownerUid == me();
+
+      match /responses/{uid} {
+        allow read: if true;
+
+        allow write: if isSignedIn()
+          && me() == uid
+          && request.resource.data.keys().hasOnly(['name','days','updatedAt'])
+          && str(request.resource.data.name, 1, 40)
+          && request.resource.data.days is map
+          && request.resource.data.days.size() <= 180;
+
+        allow delete: if isSignedIn()
+          && (me() == uid
+              || get(/databases/$(database)/documents/boards/$(boardId)).data.ownerUid == me());
+      }
+    }
+  }
+}

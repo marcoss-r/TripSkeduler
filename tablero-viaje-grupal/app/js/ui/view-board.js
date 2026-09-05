@@ -40,7 +40,7 @@ const MONTHS_LONG_ES = [
 ];
 
 export async function renderBoard(app, board) {
-  const store = getStore();
+  const store = await getStore();
   const boardId = board.boardId;
   const dates = dateRangeArray(board.startDate, board.endDate);
   const myUid = await store.getMyId();

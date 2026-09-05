@@ -171,6 +171,10 @@ users/{uid}/boards/{boardId}             ← índice privado "mis viajes"
   role:      "owner" | "participant"
   savedAt:   timestamp
 
+users/{uid}/groups/{groupId}             ← índice privado "mis grupos"
+  name:     string                       # nombre del grupo, cacheado
+  savedAt:  timestamp
+
 groups/{groupId}
   name:      string   (1..60)            # "Los de siempre"
   ownerUid:  string
@@ -207,9 +211,10 @@ Notas de diseño:
   puede renombrar sin duplicar filas y dos "Ana" no se pisan.
 - Solo se guardan los días **distintos de `none`**; `none` es el valor por
   defecto al leer. Ahorra escrituras y tamaño de documento.
-- `users/{uid}/boards` es un **índice denormalizado**: se escribe al crear o
-  al unirse a un tablero. Si se queda desincronizado (p. ej. el tablero se
-  borró), la vista lo ignora en silencio; no es fuente de verdad.
+- `users/{uid}/boards` y `users/{uid}/groups` son **índices denormalizados**:
+  se escriben al crear/unirse a un tablero o grupo. Si se quedan
+  desincronizados (p. ej. el tablero se borró), la vista lo ignora en
+  silencio; no son fuente de verdad.
 - IDs: 10 caracteres de `abcdefghijkmnopqrstuvwxyz23456789` (sin caracteres
   ambiguos) generados con `crypto.getRandomValues`. **Comprueba que no existe
   antes de crear.**
@@ -240,10 +245,13 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/groups/$(groupId)).data.ownerUid == me();
     }
 
-    // --- Perfil privado e índice "mis viajes" -------------------------------
+    // --- Perfil privado e índices "mis viajes" / "mis grupos" ---------------
     match /users/{uid} {
       allow read, write: if isSignedIn() && me() == uid;
       match /boards/{boardId} {
+        allow read, write: if isSignedIn() && me() == uid;
+      }
+      match /groups/{groupId} {
         allow read, write: if isSignedIn() && me() == uid;
       }
     }

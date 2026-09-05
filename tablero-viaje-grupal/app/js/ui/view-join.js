@@ -7,7 +7,7 @@ import { el, renderErrorBanner } from './components.js';
 
 export async function renderJoin(app, board, { onJoined }) {
   app.innerHTML = '';
-  const store = getStore();
+  const store = await getStore();
   let prefill = '';
   try {
     const profile = await store.getProfile();

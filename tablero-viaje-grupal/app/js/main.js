@@ -28,7 +28,7 @@ async function main() {
 
   renderLoading(app, 'Cargando tablero…');
 
-  const store = getStore();
+  const store = await getStore();
   let board = null;
   try {
     board = await store.getBoard(boardId);
