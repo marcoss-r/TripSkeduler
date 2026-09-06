@@ -13,6 +13,10 @@
      siendo el color de acento general de botones/enlaces) precisamente
      para no arrastrar ese cambio de color a toda la UI. */
   --status-full: #4CAF6D; --status-partial: #F2C94C; --status-unavailable: #DC3B3B;
+  /* Trama de "día bloqueado por alguien imprescindible": tiene que leerse
+     sobre los cuatro colores de estado, así que es un rayado oscuro
+     semitransparente, no un color propio. */
+  --blocked-stripes: repeating-linear-gradient(45deg, rgba(0,0,0,0.32) 0 4px, transparent 4px 9px);
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; background: var(--bg); color: var(--ink); font-family: 'Inter', sans-serif; }
@@ -37,6 +41,9 @@ button.ghost.small { font-size: 13px; padding: 8px 14px; margin-top: 8px; }
 .legend { display: flex; gap: 16px; margin-bottom: 16px; font-size: 13px; color: var(--ink-dim); align-items: center; flex-wrap: wrap; }
 .dot { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
 .dot.full { background: var(--status-full); } .dot.partial { background: var(--status-partial); } .dot.unavailable { background: var(--status-unavailable); } .dot.none { background: var(--none); border: 1px solid rgba(255,255,255,0.15); }
+/* A 10px la trama de las casillas no se ve: la muestra de la leyenda lleva
+   un rayado más fino y más claro para que se lea a ese tamaño. */
+.dot.blocked { background: var(--none); border: 1px solid var(--danger); background-image: repeating-linear-gradient(45deg, rgba(255,255,255,0.5) 0 1.5px, transparent 1.5px 3.5px); }
 .bestBox { background: var(--panel); border: 1px solid var(--highlight); border-radius: 10px; padding: 20px 24px; margin-top: 20px; }
 .bestDates { font-family: 'Big Shoulders Display', sans-serif; font-weight: 900; font-size: 32px; color: var(--highlight); }
 .bestMeta { color: var(--ink-dim); font-size: 13px; margin-top: 4px; }
@@ -115,6 +122,15 @@ button.calDay:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px
 .calDay.partial { background: var(--status-partial); color: #2A1D00; }
 .calDay.unavailable { background: var(--status-unavailable); color: var(--ink); }
 .calDay.inBest { outline: 2px solid var(--highlight); outline-offset: 2px; }
+/* Día vetado por alguien imprescindible. Va rayado en diagonal, como algo
+   tachado, y no solo con un borde de color: --danger y --highlight son el
+   MISMO rojo, así que un anillo rojo no se distinguiría del que marca la
+   mejor ventana. El anillo interior lo acompaña porque el `outline` de la
+   mejor ventana va por fuera y un día puede ser las dos cosas a la vez. */
+.calDay.blocked {
+  box-shadow: inset 0 0 0 2px var(--danger);
+  background-image: var(--blocked-stripes);
+}
 .calDayNum { font-size: 13px; font-weight: 600; line-height: 1; }
 .calDayBadge { font-size: 10px; font-family: 'IBM Plex Mono', monospace; opacity: .85; line-height: 1; }
 @media (max-width: 480px) {
@@ -165,12 +181,14 @@ button.calDay:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px
 .rosterStats { color: var(--ink-dim); font-family: 'IBM Plex Mono', monospace; font-size: 12px; }
 .rosterRight { display: flex; align-items: center; gap: 10px; }
 
-/* Ponderar participantes (backlog Fase 12): "cuenta doble" */
-.weightBadge { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--highlight); border: 1px solid var(--highlight); border-radius: 4px; padding: 1px 4px; margin-left: 4px; vertical-align: middle; }
+/* Participante imprescindible: sin esta persona no hay viaje. */
+.essentialBadge { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--danger); border: 1px solid var(--danger); border-radius: 4px; padding: 1px 5px; margin-left: 4px; vertical-align: middle; white-space: nowrap; }
+.bestBlocked { color: var(--danger); font-size: 13px; margin-top: 10px; line-height: 1.4; }
 
 /* Top-3 ventanas alternativas (backlog Fase 12) */
 .altWindows { margin-top: 4px; }
-.altRow { display: flex; justify-content: space-between; font-size: 13px; padding: 8px 12px; color: var(--ink-dim); border-bottom: 1px solid rgba(255,255,255,0.06); }
+.altRow { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; padding: 8px 12px; color: var(--ink-dim); border-bottom: 1px solid rgba(255,255,255,0.06); }
+.altRow.blocked { color: var(--danger); opacity: .75; }
 .altScore { font-family: 'IBM Plex Mono', monospace; font-size: 12px; }
 
 /* Barra y acciones de creador del tablero (Fase 5) */

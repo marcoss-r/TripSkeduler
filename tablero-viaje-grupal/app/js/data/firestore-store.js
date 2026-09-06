@@ -248,6 +248,24 @@ export async function createFirestoreStore(firebaseConfig) {
   }
 
   /**
+   * Cambios en el documento del tablero (no en sus respuestas): nombre,
+   * fechas y quién es imprescindible. Sin esto, lo que tocaba el creador
+   * solo lo veía el resto al recargar la página — ver la nota de store.js.
+   */
+  function subscribeBoard(boardId, cb, onError) {
+    return onSnapshot(
+      doc(db, 'boards', boardId),
+      (snap) => {
+        if (snap.exists()) cb(snap.data());
+      },
+      (err) => {
+        console.error(err);
+        if (onError) onError(err);
+      }
+    );
+  }
+
+  /**
    * `onError` es una extensión respecto a la interfaz local (que nunca
    * puede fallar): con un backend real sí hay errores de red o de permisos
    * que la UI necesita mostrar (Fase 5, "banner de sin conexión"). Es
@@ -394,6 +412,7 @@ export async function createFirestoreStore(firebaseConfig) {
     getBoard,
     updateBoard,
     deleteBoard,
+    subscribeBoard,
     subscribeResponses,
     saveMyResponse,
     deleteResponse,

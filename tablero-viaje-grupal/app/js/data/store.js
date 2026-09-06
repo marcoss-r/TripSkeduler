@@ -17,6 +17,7 @@
 //   getBoard(boardId)                          -> Promise<config|null>
 //   updateBoard(boardId, patch)                -> Promise<void>
 //   deleteBoard(boardId)                       -> Promise<void>
+//   subscribeBoard(boardId, cb, onError?)      -> unsubscribe()
 //   subscribeResponses(boardId, cb, onError?)  -> unsubscribe()
 //   saveMyResponse(boardId, {name, days})      -> Promise<void>
 //   deleteResponse(boardId, uid)               -> Promise<void>
@@ -34,6 +35,16 @@
 //   subscribeMembers(groupId, cb, onError?)    -> unsubscribe()
 //   listGroupBoards(groupId)                   -> Promise<Array>
 //   listMyGroups()                             -> Promise<Array>
+//
+// `subscribeBoard` es una extensión sobre el diseño original de la Fase 2.
+// Hasta añadirlo, el documento del tablero se leía UNA vez al entrar
+// (getBoard) y nunca se volvía a mirar: si el creador cambiaba el nombre,
+// las fechas o marcaba a alguien como imprescindible, el resto del grupo
+// seguía viendo lo viejo — y las puntuaciones calculadas con lo viejo —
+// hasta recargar la página. Ojo al usarlo: `expiresAt` se reescribe cada
+// vez que alguien guarda una respuesta (marcar actividad para el TTL), así
+// que este callback se dispara constantemente; quien lo consuma debe
+// comparar los campos que de verdad muestra antes de repintar nada.
 //
 // `onError` en subscribeResponses/subscribeMembers es una extensión sobre
 // el diseño original (añadida al escribir firestore-store.js, Fase 5):

@@ -45,6 +45,14 @@
 //    solo evento) y soltar la captura implícita del puntero táctil (si no,
 //    todos los `pointermove` van a la casilla donde empezó el gesto).
 //
+// 3bis. EL TABLERO SE ESCUCHA, NO SOLO SUS RESPUESTAS. `getBoard` se leía
+//    una vez al entrar y nunca más, así que lo que tocaba el creador
+//    (nombre, fechas, quién es imprescindible) el resto del grupo no lo
+//    veía —ni entraba en sus puntuaciones— hasta recargar. Ahora hay un
+//    `subscribeBoard`. Cuidado con él: `expiresAt` se reescribe cada vez
+//    que alguien guarda una respuesta, así que salta continuamente; solo
+//    se repinta si ha cambiado alguno de los campos que se muestran.
+//
 // 3. SELECTOR DE MES. Con rangos largos el calendario era una tira
 //    vertical enorme que obligaba a hacer scroll, y el scroll es
 //    justamente lo que compite con el arrastre en móvil. Se muestra un mes
@@ -59,9 +67,14 @@
 //   ciclo respecto al día donde empezó el arrastre). Un simple clic sin
 //   arrastrar es un caso particular (rango de un solo día) — es el mismo
 //   mecanismo de antes, no un modo aparte.
-// - Ponderar participantes: el dueño puede marcar a alguien como "cuenta
-//   doble" (`board.weights[uid] = 2`); solo afecta a la puntuación de
-//   `computeScores`, nunca al desglose de disponibilidad por persona.
+// - Participante imprescindible (`board.essentials[uid] = true`, sustituye
+//   al "cuenta doble" que había antes): quien pone la casa, quien conduce…
+//   gente sin la que no hay viaje. No es que su voto puntúe más — es un
+//   veto: un día que un imprescindible marca "no disponible" queda
+//   bloqueado, y una ventana con algún día bloqueado va siempre por detrás
+//   de cualquier ventana limpia, puntúe lo que puntúe (ver scoring.js).
+//   Ponderar la puntuación no valía para esto: con bastante gente
+//   disponible la suma tapaba el veto.
 // - Top-3 ventanas alternativas (topWindows, ya existía en scoring.js):
 //   se muestran las dos siguientes mejores ventanas no solapadas con la
 //   principal.
@@ -108,7 +121,7 @@ export async function renderBoard(app, board) {
 
   let responses = [];
   let groupMembers = null; // solo si board.groupId; sirve para "quién falta por responder" (Fase 9)
-  let weights = { ...(board.weights || {}) }; // uid -> 2 si "cuenta doble" (backlog Fase 12); ausente = 1
+  let essentials = { ...(board.essentials || {}) }; // uid -> true si es imprescindible; ausente = participante normal
   let pendingDays = null; // override optimista de mis propios días mientras el guardado está en curso
   let saveState = 'idle'; // idle | saving | saved | error
   let gotFirstSnapshot = false;
@@ -175,9 +188,34 @@ export async function renderBoard(app, board) {
     return responses.map((r) => (r.uid === myUid ? { ...r, days: pendingDays } : r));
   }
 
-  /** `currentResponses` con el campo `weight` añadido, solo para pasar a computeScores (backlog: ponderar participantes). */
-  function weightedResponses(currentResponses) {
-    return currentResponses.map((r) => ({ ...r, weight: weights[r.uid] || 1 }));
+  /** `currentResponses` con el flag `essential` añadido, solo para pasar a computeScores. */
+  function withEssential(currentResponses) {
+    return currentResponses.map((r) => ({ ...r, essential: !!essentials[r.uid] }));
+  }
+
+  /**
+   * Para cada día, los nombres de los imprescindibles que lo han marcado
+   * como "no disponible" — o sea, quién bloquea qué. Se calcula de una vez
+   * por repintado y se reparte a las casillas y a la caja de mejor ventana.
+   */
+  function blockersByDay(currentResponses) {
+    const map = {};
+    for (const r of currentResponses) {
+      if (!essentials[r.uid]) continue;
+      for (const d of dates) {
+        if ((r.days && r.days[d]) === 'unavailable') (map[d] = map[d] || []).push(r.name);
+      }
+    }
+    return map;
+  }
+
+  /** Nombres de imprescindibles que bloquean algún día de la ventana [start, end]. */
+  function blockersInWindow(blockedBy, start, end) {
+    const names = new Set();
+    for (const d of dates) {
+      if (d >= start && d <= end) for (const n of blockedBy[d] || []) names.add(n);
+    }
+    return [...names];
   }
 
   const unsubscribe = store.subscribeResponses(boardId, (r) => {
@@ -185,6 +223,37 @@ export async function renderBoard(app, board) {
     gotFirstSnapshot = true;
     draw();
   });
+  // El documento del tablero también se escucha, no solo sus respuestas:
+  // sin esto, lo que tocaba el creador (nombre, fechas, quién es
+  // imprescindible) el resto del grupo no lo veía hasta recargar — y las
+  // puntuaciones se seguían calculando con lo viejo.
+  //
+  // ⚠️ Este callback salta CONSTANTEMENTE: cada respuesta que alguien
+  // guarda reescribe `expiresAt` del tablero (marcar actividad para el
+  // TTL). Por eso se compara antes de repintar; si no, cada vez que otra
+  // persona marcase un día se repintaría la página entera y volverían los
+  // saltos que acabamos de quitar.
+  const unsubscribeBoard = store.subscribeBoard(boardId, (fresh) => {
+    const freshEssentials = fresh.essentials || {};
+    const changed =
+      fresh.tripName !== board.tripName ||
+      fresh.startDate !== board.startDate ||
+      fresh.endDate !== board.endDate ||
+      !sameKeys(freshEssentials, essentials);
+    if (!changed) return;
+
+    board.tripName = fresh.tripName;
+    board.startDate = fresh.startDate;
+    board.endDate = fresh.endDate;
+    dates = dateRangeArray(fresh.startDate, fresh.endDate);
+    essentials = { ...freshEssentials };
+    // No pisar el formulario del creador mientras lo tiene abierto ni una
+    // escritura suya en curso: en ambos casos ya hay un draw() esperando al
+    // final de la operación.
+    if (editingBoard || boardBusy) return;
+    draw();
+  });
+
   const unsubscribeMembers = board.groupId
     ? store.subscribeMembers(board.groupId, (m) => {
         groupMembers = m;
@@ -204,6 +273,7 @@ export async function renderBoard(app, board) {
   if (previousCleanup) previousCleanup();
   app._viewBoardCleanup = () => {
     unsubscribe();
+    unsubscribeBoard();
     if (unsubscribeMembers) unsubscribeMembers();
     window.removeEventListener('pointermove', onPointerMove);
     window.removeEventListener('pointerup', onPointerFinish);
@@ -355,24 +425,23 @@ export async function renderBoard(app, board) {
     }
   }
 
-  /** Ponderar participantes (backlog Fase 12): alterna entre peso 1 y 2 ("cuenta doble") para un participante. */
-  async function onToggleWeight(uid) {
-    const next = (weights[uid] || 1) === 2 ? 1 : 2;
-    const updated = { ...weights };
-    if (next === 1) delete updated[uid]; // no acumular basura: ausente == 1
-    else updated[uid] = next;
+  /** Marca o desmarca a un participante como imprescindible (sin él/ella no hay viaje). */
+  async function onToggleEssential(uid) {
+    const updated = { ...essentials };
+    if (updated[uid]) delete updated[uid]; // no acumular basura: ausente == participante normal
+    else updated[uid] = true;
 
-    const previous = weights;
-    weights = updated;
+    const previous = essentials;
+    essentials = updated;
     boardBusy = true;
     draw();
     try {
-      await store.updateBoard(boardId, { weights: updated });
+      await store.updateBoard(boardId, { essentials: updated });
       transientError = null;
     } catch (err) {
       console.error(err);
-      weights = previous;
-      transientError = 'No se pudo actualizar la ponderación. Inténtalo de nuevo.';
+      essentials = previous;
+      transientError = 'No se pudo cambiar quién es imprescindible. Inténtalo de nuevo.';
     } finally {
       boardBusy = false;
       draw();
@@ -459,9 +528,10 @@ export async function renderBoard(app, board) {
     }
 
     const currentResponses = effectiveResponses();
-    const { scores, breakdown } = computeScores(dates, weightedResponses(currentResponses));
+    const { scores, breakdown } = computeScores(dates, withEssential(currentResponses));
     const best = bestWindow(dates, scores, breakdown, board.tripLength);
     const top = topWindows(dates, scores, breakdown, board.tripLength, 3);
+    const blockedBy = blockersByDay(currentResponses);
 
     app.innerHTML = '';
     container = el(`<div class="wrap wide boardView">
@@ -487,6 +557,7 @@ export async function renderBoard(app, board) {
         <span><i class="dot partial"></i>Parcial</span>
         <span><i class="dot unavailable"></i>No disponible</span>
         <span><i class="dot none"></i>No definido</span>
+        <span><i class="dot blocked"></i>Bloqueado: no puede alguien imprescindible</span>
         <span>· el número bajo cada día es la puntuación del grupo · arrastra el dedo o el ratón sobre varios días para marcarlos de una vez</span>
       </div>
       <div id="monthSlot"></div>
@@ -526,8 +597,10 @@ export async function renderBoard(app, board) {
     }
 
     drawMonthPicker(container.querySelector('#monthSlot'), months);
-    drawCalendar(container.querySelector('.calendar'), { months, scores, breakdown, best, totalResponses: currentResponses.length });
-    drawBestBox(container.querySelector('.bestBox'), { best, responses: currentResponses });
+    drawCalendar(container.querySelector('.calendar'), {
+      months, scores, breakdown, best, blockedBy, totalResponses: currentResponses.length,
+    });
+    drawBestBox(container.querySelector('.bestBox'), { best, responses: currentResponses, blockedBy });
     drawAlternatives(container.querySelector('.altWindows'), { top });
     drawRoster(container.querySelector('.roster'), { dates, responses: currentResponses, myUid });
   }
@@ -543,15 +616,16 @@ export async function renderBoard(app, board) {
     if (!container) return draw();
 
     const currentResponses = effectiveResponses();
-    const { scores, breakdown } = computeScores(dates, weightedResponses(currentResponses));
+    const { scores, breakdown } = computeScores(dates, withEssential(currentResponses));
     const best = bestWindow(dates, scores, breakdown, board.tripLength);
     const top = topWindows(dates, scores, breakdown, board.tripLength, 3);
-    const ctx = { scores, breakdown, best, totalResponses: currentResponses.length };
+    const blockedBy = blockersByDay(currentResponses);
+    const ctx = { scores, breakdown, best, blockedBy, totalResponses: currentResponses.length };
 
     for (const cell of container.querySelectorAll('.calDay[data-day]')) {
       updateDayCell(cell, cell.dataset.day, ctx);
     }
-    drawBestBox(container.querySelector('.bestBox'), { best, responses: currentResponses });
+    drawBestBox(container.querySelector('.bestBox'), { best, responses: currentResponses, blockedBy });
     drawAlternatives(container.querySelector('.altWindows'), { top });
     const rosterEl = container.querySelector('.roster');
     rosterEl.innerHTML = '';
@@ -594,7 +668,7 @@ export async function renderBoard(app, board) {
     ownerSlot.appendChild(bar);
   }
 
-  function drawCalendar(calendarEl, { months, scores, breakdown, best, totalResponses }) {
+  function drawCalendar(calendarEl, { months, scores, breakdown, best, blockedBy, totalResponses }) {
     const shown = visibleMonth === ALL_MONTHS ? months : months.filter((m) => monthKey(m) === visibleMonth);
     for (const { year, month, dates: monthDates } of shown) {
       const monthBlock = el(`<div class="calMonth">
@@ -610,7 +684,7 @@ export async function renderBoard(app, board) {
         daysEl.appendChild(el('<div class="calDay empty"></div>'));
       }
       for (const d of monthDates) {
-        daysEl.appendChild(makeDayCell(d, { scores, breakdown, best, totalResponses }));
+        daysEl.appendChild(makeDayCell(d, { scores, breakdown, best, blockedBy, totalResponses }));
       }
     }
   }
@@ -658,14 +732,17 @@ export async function renderBoard(app, board) {
     return btn;
   }
 
-  /** Actualiza una casilla ya existente: color, tooltip y puntuación del grupo. */
-  function updateDayCell(btn, day, { scores, breakdown, best, totalResponses }) {
+  /** Actualiza una casilla ya existente: color, marca de bloqueo, tooltip y puntuación del grupo. */
+  function updateDayCell(btn, day, { scores, breakdown, best, blockedBy, totalResponses }) {
     const myStatus = myDays()[day] || 'none';
     const inBest = best && day >= best.start && day <= best.end;
-    btn.className = `calDay ${myStatus}${inBest ? ' inBest' : ''}`;
+    const blockers = blockedBy[day] || [];
+    btn.className = `calDay ${myStatus}${inBest ? ' inBest' : ''}${blockers.length ? ' blocked' : ''}`;
 
     const bd = breakdown[day];
-    const tooltip = `${dayNum(day)} de ${MONTHS_LONG_ES[monthOf(day)]}: tú — ${STATUS_LABEL[myStatus]}. Grupo: ${bd.full} disponible · ${bd.partial} parcial · ${bd.unavailable} no disponible · ${bd.none} sin marcar.`;
+    const tooltip = `${dayNum(day)} de ${MONTHS_LONG_ES[monthOf(day)]}: tú — ${STATUS_LABEL[myStatus]}. Grupo: ${bd.full} disponible · ${bd.partial} parcial · ${bd.unavailable} no disponible · ${bd.none} sin marcar.${
+      blockers.length ? ` Bloqueado: ${blockers.join(', ')} ${blockers.length === 1 ? 'es imprescindible y no puede' : 'son imprescindibles y no pueden'}.` : ''
+    }`;
     btn.title = tooltip;
     btn.setAttribute('aria-label', `${tooltip} Actívalo para cambiar tu disponibilidad.`);
 
@@ -673,16 +750,23 @@ export async function renderBoard(app, board) {
     badge.textContent = totalResponses > 0 ? `${formatScore(scores[day] || 0)}/${totalResponses}` : '';
   }
 
-  function drawBestBox(bestBox, { best, responses: currentResponses }) {
-    if (best) {
-      const totalWeight = currentResponses.reduce((sum, r) => sum + (weights[r.uid] || 1), 0);
-      bestBox.innerHTML = `
-        <div class="eyebrow">MEJOR VENTANA · ${board.tripLength} DÍAS</div>
-        <div class="bestDates">${monthShort(best.start)} ${dayNum(best.start)} — ${monthShort(best.end)} ${dayNum(best.end)}</div>
-        <div class="bestMeta">Puntuación ${formatScore(best.sum)} de ${board.tripLength * totalWeight} máx. · ${best.fullCount} disponibilidades completas</div>`;
-    } else {
+  function drawBestBox(bestBox, { best, responses: currentResponses, blockedBy }) {
+    if (!best) {
       bestBox.innerHTML = `<p class="sub" style="margin:0;">El rango de fechas es más corto que la duración del viaje.</p>`;
+      return;
     }
+    const max = board.tripLength * currentResponses.length;
+    // Si la MEJOR ventana sigue teniendo días bloqueados es que no queda
+    // ninguna limpia en todo el rango: hay que decirlo, porque la propuesta
+    // que se está enseñando no vale tal cual.
+    const blockers = best.blockedDays > 0 ? blockersInWindow(blockedBy, best.start, best.end) : [];
+    bestBox.innerHTML = `
+      <div class="eyebrow">MEJOR VENTANA · ${board.tripLength} DÍAS</div>
+      <div class="bestDates">${monthShort(best.start)} ${dayNum(best.start)} — ${monthShort(best.end)} ${dayNum(best.end)}</div>
+      <div class="bestMeta">Puntuación ${formatScore(best.sum)} de ${max} máx. · ${best.fullCount} disponibilidades completas</div>
+      ${blockers.length
+        ? `<div class="bestBlocked">⚠️ No queda ninguna ventana libre: aquí ${blockers.length === 1 ? 'falla' : 'fallan'} ${blockers.map(escapeHtml).join(', ')} (${best.blockedDays} ${best.blockedDays === 1 ? 'día bloqueado' : 'días bloqueados'}).</div>`
+        : ''}`;
   }
 
   /** Top-3 ventanas alternativas (backlog Fase 12): se omite la [0], que ya se muestra en drawBestBox. */
@@ -695,8 +779,10 @@ export async function renderBoard(app, board) {
     altBox.innerHTML = '<div class="eyebrow" style="margin-top:20px;">OTRAS VENTANAS POSIBLES</div>';
     for (const w of alternatives) {
       altBox.appendChild(
-        el(`<div class="altRow">
-          <span>${monthShort(w.start)} ${dayNum(w.start)} — ${monthShort(w.end)} ${dayNum(w.end)}</span>
+        el(`<div class="altRow${w.blockedDays > 0 ? ' blocked' : ''}">
+          <span>${monthShort(w.start)} ${dayNum(w.start)} — ${monthShort(w.end)} ${dayNum(w.end)}${
+            w.blockedDays > 0 ? ' · bloqueada' : ''
+          }</span>
           <span class="altScore">Puntuación ${formatScore(w.sum)}</span>
         </div>`)
       );
@@ -706,7 +792,7 @@ export async function renderBoard(app, board) {
   function drawRoster(rosterEl, { dates, responses: currentResponses, myUid }) {
     for (const r of currentResponses) {
       const isMine = r.uid === myUid;
-      const weight = weights[r.uid] || 1;
+      const isEssential = !!essentials[r.uid];
       let full = 0;
       let partial = 0;
       let unavailable = 0;
@@ -718,16 +804,16 @@ export async function renderBoard(app, board) {
       }
       const row = el(`<div class="rosterRow ${isMine ? 'mine' : ''}">
           <span class="rosterName ${isMine ? 'mine' : ''}">${escapeHtml(r.name)}${isMine ? ' (tú)' : ''}${
-            weight === 2 ? ' <span class="weightBadge" title="Cuenta doble en la puntuación">×2</span>' : ''
+            isEssential ? ' <span class="essentialBadge" title="Sin esta persona no hay viaje: los días que marque como no disponible quedan bloqueados">imprescindible</span>' : ''
           }</span>
           <span class="rosterRight">
             <span class="rosterStats">${full} disponible${full === 1 ? '' : 's'} · ${partial} parcial${partial === 1 ? '' : 'es'} · ${unavailable} no disponible${unavailable === 1 ? '' : 's'}</span>
-            ${isOwner ? `<button type="button" class="ghost small weightBtn" ${boardBusy ? 'disabled' : ''}>${weight === 2 ? 'Cuenta doble ✓' : 'Cuenta doble'}</button>` : ''}
+            ${isOwner ? `<button type="button" class="ghost small essentialBtn" ${boardBusy ? 'disabled' : ''} title="Sin esta persona no hay viaje: los días que marque como no disponible quedan bloqueados">${isEssential ? 'Imprescindible ✓' : 'Imprescindible'}</button>` : ''}
             ${isOwner && !isMine ? '<button type="button" class="ghost small danger removeBtn">Quitar</button>' : ''}
           </span>
         </div>`);
       if (isOwner) {
-        row.querySelector('.weightBtn').addEventListener('click', () => onToggleWeight(r.uid));
+        row.querySelector('.essentialBtn').addEventListener('click', () => onToggleEssential(r.uid));
       }
       if (isOwner && !isMine) {
         row.querySelector('.removeBtn').addEventListener('click', () => onRemoveParticipant(r.uid, r.name));
@@ -740,6 +826,13 @@ export async function renderBoard(app, board) {
 }
 
 // --- utilidades locales de esta vista ---------------------------------------
+
+/** Compara dos mapas "uid -> true" por su conjunto de claves. */
+function sameKeys(a, b) {
+  const ka = Object.keys(a);
+  const kb = Object.keys(b);
+  return ka.length === kb.length && ka.every((k) => k in b);
+}
 
 function monthOf(dateStr) {
   return Number(dateStr.split('-')[1]) - 1;

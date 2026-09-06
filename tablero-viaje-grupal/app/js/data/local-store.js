@@ -130,6 +130,20 @@ async function updateBoard(boardId, patch) {
   const current = readJSON(key);
   if (!current) throw new Error(`El tablero ${boardId} no existe`);
   writeJSON(key, { ...current, ...patch });
+  // Faltaba: sin esto, los cambios del creador (nombre, fechas, quién es
+  // imprescindible) no llegaban a las vistas abiertas hasta recargar.
+  notify(`board:${boardId}`);
+}
+
+/** Cambios en el documento del tablero (no en sus respuestas): ver la nota de store.js. */
+function subscribeBoard(boardId, cb) {
+  const topic = `board:${boardId}`;
+  const emit = () => {
+    const value = readJSON(`${PREFIX}board:${boardId}`);
+    if (value) cb(value);
+  };
+  emit(); // primer valor inmediato, como pide la interfaz
+  return subscribeTopic(topic, emit);
 }
 
 async function deleteBoard(boardId) {
@@ -285,6 +299,7 @@ export const localStore = {
   getBoard,
   updateBoard,
   deleteBoard,
+  subscribeBoard,
   subscribeResponses,
   saveMyResponse,
   deleteResponse,

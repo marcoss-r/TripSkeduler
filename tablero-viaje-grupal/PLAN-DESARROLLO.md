@@ -195,7 +195,9 @@ boards/{boardId}
   expiresAt:  timestamp                  # borrado automático (backlog); se fija al
                                           # crear y se empuja 8 meses hacia adelante
                                           # con cada respuesta guardada — ver sección 6, Fase 12
-  weights:    map { uid: number } | ausente  # backlog: "cuenta doble"; ausente == 1 para todos
+  essentials: map { uid: true } | ausente    # participantes imprescindibles: sus días
+                                          # "unavailable" bloquean la ventana entera
+                                          # (ausente == nadie lo es)
 
 boards/{boardId}/responses/{uid}         ← el docId ES el uid
   name:      string   (1..40)
@@ -299,7 +301,7 @@ service cloud.firestore {
 
       allow create: if isSignedIn()
         && request.resource.data.keys().hasOnly(
-             ['tripName','startDate','endDate','tripLength','groupId','ownerUid','createdAt','expiresAt','weights'])
+             ['tripName','startDate','endDate','tripLength','groupId','ownerUid','createdAt','expiresAt','essentials'])
         && str(request.resource.data.tripName, 1, 80)
         && isDate(request.resource.data.startDate)
         && isDate(request.resource.data.endDate)
@@ -311,7 +313,7 @@ service cloud.firestore {
         && (request.resource.data.groupId == null
             || isGroupMember(request.resource.data.groupId));
 
-      // El dueño edita cualquier campo (nombre/fechas, Fase 5; `weights`,
+      // El dueño edita cualquier campo (nombre/fechas, Fase 5; `essentials`,
       // backlog Fase 12). Cualquier persona autenticada puede, además,
       // EXCLUSIVAMENTE empujar `expiresAt` hacia delante — así se marca
       // "actividad" para el TTL sin que solo el dueño pueda mantener vivo
@@ -729,12 +731,20 @@ ocurrió con los 4 primeros ítems, ya hechos):
 
 - ✅ Top-3 ventanas alternativas (`topWindows` + sección "Otras ventanas
   posibles" bajo la mejor ventana, en `view-board.js`).
-- ✅ "Marcar rango" arrastrando en vez de clic día a día (mousedown +
-  mouseenter + mouseup global sobre el calendario; solo ratón — en móvil
-  se sigue tocando día a día).
-- ✅ Ponderar participantes: el dueño marca a alguien como "cuenta doble"
-  (`boards/{id}.weights`); afecta solo a `computeScores`, nunca al
-  desglose de disponibilidad por persona.
+- ✅ "Marcar rango" arrastrando en vez de clic día a día. Va con eventos
+  de puntero (pointerdown + pointermove global resuelto con
+  `elementFromPoint` + pointerup), así que funciona igual con ratón y con
+  el dedo. Dos requisitos que no son opcionales: `touch-action: none` en
+  la rejilla (si no, el navegador se queda el gesto para hacer scroll) y
+  `releasePointerCapture` (si no, todos los `pointermove` van a la casilla
+  donde empezó el gesto).
+- ✅ Participante imprescindible (sustituye al "cuenta doble" que hubo
+  antes): el dueño marca a quien sin ella no hay viaje
+  (`boards/{id}.essentials`). No es más puntuación, es un veto — un día
+  que esa persona marca "no disponible" queda bloqueado, y una ventana con
+  algún día bloqueado va detrás de cualquier ventana limpia, puntúe lo que
+  puntúe. Ponderar la puntuación no servía: con bastante gente disponible
+  la suma tapaba el veto.
 - ✅ Borrado automático de tableros sin actividad — implementado como TTL
   de Firestore, no como código propio: `boards/{id}.expiresAt` se fija al
   crear (8 meses vista) y se empuja otros 8 meses con cada respuesta

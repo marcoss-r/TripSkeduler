@@ -23,12 +23,17 @@ la mejor ventana de días consecutivos para todo el grupo.
   (duración del viaje) según la disponibilidad agregada del grupo, más las
   2 siguientes mejores ventanas alternativas (no solapadas con la
   principal).
-- **Marcar varios días a la vez**: arrastra el ratón sobre el calendario
-  para pintar un rango entero con un solo estado, en vez de ir día a día
-  (en móvil se sigue tocando casilla a casilla).
-- **Ponderar participantes**: el creador del tablero puede marcar a
-  alguien como "cuenta doble" en la puntuación (por ejemplo, la persona
-  sin la que el viaje no tiene sentido).
+- **Marcar varios días a la vez**: arrastra el dedo o el ratón sobre el
+  calendario para pintar un rango entero con un solo estado, en vez de ir
+  día a día.
+- **Un mes cada vez**: con rangos largos el calendario se navega con un
+  desplegable de meses, en lugar de una tira vertical de hasta seis. La
+  puntuación y la mejor ventana se siguen calculando sobre todo el rango.
+- **Participantes imprescindibles**: el creador del tablero puede marcar a
+  quien sin ella no hay viaje (quien pone la casa, quien conduce). No
+  puntúa más: los días que esa persona marque como "no disponible" quedan
+  bloqueados, y cualquier ventana que los incluya se descarta frente a una
+  ventana limpia, aunque puntúe menos.
 - **Identidad sin fricción, en 3 niveles**: anónimo (automático), con
   perfil (solo escribes tu nombre una vez) y, opcionalmente, con cuenta de
   Google para tener tus viajes en todos tus dispositivos. Nunca hace falta
@@ -114,7 +119,8 @@ groups/{groupId}/members/{uid}       name, joinedAt
 
 boards/{boardId}                     tripName, startDate, endDate,
                                       tripLength, groupId (o null), ownerUid,
-                                      expiresAt (borrado automático), weights (ponderar)
+                                      expiresAt (borrado automático),
+                                      essentials (participantes imprescindibles)
 boards/{boardId}/responses/{uid}     name, days: { "YYYY-MM-DD": estado }
 ```
 

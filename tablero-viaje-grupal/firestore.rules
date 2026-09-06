@@ -76,7 +76,7 @@ service cloud.firestore {
 
       allow create: if isSignedIn()
         && request.resource.data.keys().hasOnly(
-             ['tripName','startDate','endDate','tripLength','groupId','ownerUid','createdAt','expiresAt','weights'])
+             ['tripName','startDate','endDate','tripLength','groupId','ownerUid','createdAt','expiresAt','essentials'])
         && str(request.resource.data.tripName, 1, 80)
         && isDate(request.resource.data.startDate)
         && isDate(request.resource.data.endDate)
@@ -89,7 +89,7 @@ service cloud.firestore {
             || isGroupMember(request.resource.data.groupId));
 
       // El dueño puede editar cualquier campo (nombre/fechas — Fase 5 — y
-      // `weights`, ponderar participantes — backlog Fase 12). Cualquier
+      // `essentials`, quién es imprescindible). Cualquier
       // persona autenticada puede, además, EXCLUSIVAMENTE empujar
       // `expiresAt` hacia adelante: es como se marca "actividad" para el
       // borrado automático por TTL (ver firestore-store.js) sin dar al
