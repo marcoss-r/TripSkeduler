@@ -13,9 +13,13 @@ permissions:
   pages: write
   id-token: write
 
+# Un solo despliegue a la vez, pero NUNCA cancelar el que ya está en marcha:
+# cancelar un deploy-pages a medias deja el despliegue de Pages colgado y el
+# sitio sirviendo 404 hasta que se relanza a mano. Es lo que recomienda la
+# propia plantilla oficial de GitHub para Pages.
 concurrency:
   group: pages
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   deploy:
