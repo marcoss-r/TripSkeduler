@@ -64,10 +64,19 @@ export function renderMessageScreen(app, { eyebrow, title, message, linkHref, li
  * lo pierde y la app cambia de golpe al backend de `config.js`. NO usar para
  * enlaces pensados para compartir con otras personas (esos van con
  * `location.pathname` a secas: nadie más debe heredar tu flag de depuración).
+ *
+ * 🔒 El valor de `store` NO se propaga tal cual: se compara con el único
+ * literal admitido ('local', que es también lo único que mira store.js).
+ * Antes se reenviaba el parámetro en crudo y acababa dentro de un
+ * `href="..."` sin escapar, así que un enlace preparado del tipo
+ * `?store=x" onfocus="…" autofocus="` inyectaba atributos y ejecutaba
+ * JavaScript en el origen de la app (XSS reflejado, reproducido con
+ * Playwright). Al no reflejar nunca la entrada del usuario, el agujero
+ * desaparece de raíz en vez de depender de escapar bien en cada plantilla.
  */
 export function appUrl(query = '') {
-  const store = new URLSearchParams(location.search).get('store');
-  const parts = [query, store ? `store=${store}` : ''].filter(Boolean);
+  const isLocalStore = new URLSearchParams(location.search).get('store') === 'local';
+  const parts = [query, isLocalStore ? 'store=local' : ''].filter(Boolean);
   return parts.length ? `${location.pathname}?${parts.join('&')}` : location.pathname;
 }
 

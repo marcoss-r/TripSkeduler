@@ -30,7 +30,16 @@ service cloud.firestore {
 
     // --- Grupos ------------------------------------------------------------
     match /groups/{groupId} {
-      allow read: if true;                       // el id no es adivinable
+      // `get` (leer UN grupo cuyo id ya conoces) sí es público: el enlace es
+      // la credencial y el id no es adivinable. `list` NO: en Firestore un
+      // `allow read` cubre también las consultas a la colección, así que
+      // `read: if true` dejaba que cualquiera se descargara TODOS los grupos
+      // (con sus nombres y dueños) sin conocer ningún enlace, que es
+      // justo lo contrario del modelo de esta app. La app nunca consulta la
+      // colección `groups` entera: "mis grupos" sale del índice privado
+      // users/{uid}/groups.
+      allow get: if true;
+      allow list: if false;
 
       allow create: if isSignedIn()
         && request.resource.data.keys().hasOnly(['name','ownerUid','createdAt'])
@@ -51,7 +60,19 @@ service cloud.firestore {
 
     // --- Tableros ----------------------------------------------------------
     match /boards/{boardId} {
-      allow read: if true;
+      // Mismo razonamiento que en /groups: `get` público (el enlace es la
+      // credencial), pero `list` restringido. Con `read: if true` cualquiera
+      // podía volcarse la colección `boards` entera —todos los viajes de
+      // todo el mundo, y desde ahí sus respuestas— sin tener ningún enlace.
+      // La única consulta real de la app sobre esta colección es
+      // listGroupBoards (los viajes de UN grupo), así que se permite listar
+      // solo documentos de un grupo del que ya eres miembro; Firestore
+      // evalúa esta condición contra cada documento devuelto, de modo que
+      // una consulta sin filtrar (o de un grupo ajeno) falla entera.
+      // Los tableros sueltos (groupId == null) no son listables nunca: solo
+      // accesibles por su enlace directo.
+      allow get: if true;
+      allow list: if isSignedIn() && isGroupMember(resource.data.groupId);
 
       allow create: if isSignedIn()
         && request.resource.data.keys().hasOnly(
@@ -74,11 +95,17 @@ service cloud.firestore {
       // borrado automático por TTL (ver firestore-store.js) sin dar al
       // dueño en exclusiva la capacidad de "salvar" su propio tablero de
       // caducar con cada visita de cualquier participante.
+      // ⚠️ `expiresAt` solo se puede empujar HACIA ADELANTE. Sin la
+      // comprobación `> request.time`, cualquiera con el enlace podía
+      // ponerlo en el pasado y provocar que el TTL de Firestore borrase el
+      // tablero de otra persona en cuestión de horas: un borrado ajeno
+      // disfrazado de "marcar actividad".
       allow update: if isSignedIn() && (
         resource.data.ownerUid == me()
         || (
           request.resource.data.diff(resource.data).affectedKeys().hasOnly(['expiresAt'])
           && request.resource.data.expiresAt is timestamp
+          && request.resource.data.expiresAt > request.time
         )
       );
       allow delete: if isSignedIn() && resource.data.ownerUid == me();
