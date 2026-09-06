@@ -57,9 +57,9 @@ button.ghost.small { font-size: 13px; padding: 8px 14px; margin-top: 8px; }
 @keyframes pulse { 0%, 100% { opacity: .3; } 50% { opacity: 1; } }
 
 /* Pantalla "compartir enlace" tras crear un tablero */
-.shareBox { display: flex; gap: 8px; align-items: stretch; }
-.shareBox input { flex: 1; font-family: 'IBM Plex Mono', monospace; font-size: 13px; }
-.shareBox button { white-space: nowrap; }
+.shareBox { display: flex; gap: 8px; align-items: stretch; flex-wrap: wrap; }
+.shareBox input { flex: 1 1 200px; min-width: 0; font-family: 'IBM Plex Mono', monospace; font-size: 13px; }
+.shareBox button { white-space: nowrap; flex-shrink: 0; }
 
 .notFoundBox { text-align: center; padding: 64px 24px; }
 .notFoundBox a { color: var(--full); font-weight: 600; }
