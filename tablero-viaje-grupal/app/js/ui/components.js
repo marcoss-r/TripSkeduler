@@ -80,6 +80,58 @@ export function appUrl(query = '') {
   return parts.length ? `${location.pathname}?${parts.join('&')}` : location.pathname;
 }
 
+/**
+ * URL absoluta pensada para COMPARTIR con otra persona (WhatsApp, etc.).
+ * Es la contraparte de `appUrl`: esta sí lleva origen completo y NUNCA
+ * arrastra `?store=local`, porque nadie más debe heredar un flag de
+ * depuración al abrir un enlace que le han pasado.
+ */
+export function shareableUrl(query) {
+  return `${location.origin}${location.pathname}?${query}`;
+}
+
+/**
+ * Caja "enlace + Copiar", compartida por la pantalla de creación, la vista
+ * de grupo y la del tablero. Está aquí y no repetida en cada vista porque
+ * el enlace de un tablero hay que poder verlo SIEMPRE, no solo el día que
+ * se creó: si se pierde el mensaje donde se compartió, la única forma de
+ * recuperarlo era volver a crear el tablero.
+ *
+ * El botón no da por hecho que exista el portapapeles: sin API o sin
+ * permiso (navegadores antiguos, WebView, http sin TLS) deja el enlace
+ * seleccionado para copiarlo a mano en vez de fallar en silencio.
+ */
+export function renderShareBox(url, { label = 'Copiar enlace', ghost = false } = {}) {
+  const box = el(`<div class="shareBox">
+    <input type="text" class="shareUrl" readonly value="${escapeHtml(url)}">
+    <button type="button" class="copyBtn${ghost ? ' ghost' : ''}">${escapeHtml(label)}</button>
+  </div>`);
+
+  const input = box.querySelector('.shareUrl');
+  const btn = box.querySelector('.copyBtn');
+  let restore = null;
+
+  // Tocar el campo selecciona el enlace entero: en móvil, colocar el cursor
+  // a mano dentro de una URL larga es un suplicio.
+  input.addEventListener('focus', () => input.select());
+
+  btn.addEventListener('click', async () => {
+    clearTimeout(restore);
+    try {
+      await navigator.clipboard.writeText(url);
+      btn.textContent = 'Copiado ✓';
+      restore = setTimeout(() => (btn.textContent = label), 1500);
+    } catch {
+      input.focus();
+      input.select();
+      btn.textContent = 'Cópialo a mano';
+      restore = setTimeout(() => (btn.textContent = label), 3000);
+    }
+  });
+
+  return box;
+}
+
 export function escapeHtml(s) {
   const div = document.createElement('div');
   div.textContent = String(s);

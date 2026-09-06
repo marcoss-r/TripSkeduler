@@ -82,7 +82,7 @@
 import { getStore } from '../data/store.js';
 import { dateRangeArray, isValidRange, MAX_RANGE_DAYS, monthShort, dayNum, groupByMonth, mondayIndex, fmtDate } from '../core/dates.js';
 import { computeScores, bestWindow, topWindows } from '../core/scoring.js';
-import { el, debounce, renderErrorBanner, appUrl } from './components.js';
+import { el, debounce, renderErrorBanner, appUrl, renderShareBox, shareableUrl } from './components.js';
 
 // Orden del ciclo al hacer clic: empieza en "no definido" (el estado por
 // defecto de un día sin marcar) y va de más a menos disponible, terminando
@@ -127,6 +127,7 @@ export async function renderBoard(app, board) {
   let dates = dateRangeArray(board.startDate, board.endDate); // recalculada si el creador edita las fechas
   const myUid = await store.getMyId();
   const isOwner = board.ownerUid === myUid;
+  const boardUrl = shareableUrl(`b=${encodeURIComponent(boardId)}`);
 
   let responses = [];
   let groupMembers = null; // solo si board.groupId; sirve para "quién falta por responder" (Fase 9)
@@ -601,6 +602,7 @@ export async function renderBoard(app, board) {
           <span class="saveState ${saveState}" id="saveState" role="status" aria-live="polite">${SAVE_LABEL[saveState]}</span>
         </div>
       </div>
+      <div id="shareSlot" class="boardShare"></div>
       ${isOwner ? '<div id="ownerSlot"></div>' : ''}
       <div id="bannerSlot"></div>
       <div id="pendingSlot"></div>
@@ -622,6 +624,12 @@ export async function renderBoard(app, board) {
         : ''}
     </div>`);
     app.appendChild(container);
+
+    // El enlace del tablero, siempre visible: es lo que se pasa por WhatsApp
+    // y hasta ahora solo aparecía en la pantalla de "tablero creado", así que
+    // quien lo perdía no tenía forma de recuperarlo desde la app.
+    // En ghost a propósito: aquí la acción principal es marcar días, no compartir.
+    container.querySelector('#shareSlot').appendChild(renderShareBox(boardUrl, { ghost: true }));
 
     if (isOwner) {
       drawOwnerBar(container.querySelector('#ownerSlot'));

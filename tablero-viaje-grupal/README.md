@@ -47,10 +47,14 @@ la mejor ventana de días consecutivos para todo el grupo.
    pasado un enlace y no puedes abrirlo directamente (por ejemplo porque
    tienes la app instalada en el móvil y el enlace abre el navegador),
    **Abrir un enlace** acepta el enlace pegado o solo su identificador.
-2. Compartir el enlace. Cada persona entra, escribe su nombre (o entra con
-   Google) y marca su disponibilidad día a día sobre el calendario
-   (clic para ciclar entre los 4 estados).
-3. La app resalta la ventana de días con mejor puntuación agregada y
+2. Compartir el enlace. Aparece al crear el tablero y **también dentro del
+   propio tablero**, siempre visible en la cabecera, para poder recuperarlo
+   cuando haga falta sin depender del mensaje donde se compartió (lo mismo
+   en la vista de grupo).
+3. Cada persona entra, escribe su nombre (o entra con Google) y marca su
+   disponibilidad día a día sobre el calendario (clic para ciclar entre los
+   4 estados).
+4. La app resalta la ventana de días con mejor puntuación agregada y
    muestra quién falta por responder (en tableros de grupo).
 
 ## Ejecutar en local

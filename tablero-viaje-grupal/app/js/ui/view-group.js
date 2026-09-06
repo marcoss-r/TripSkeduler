@@ -7,7 +7,15 @@
 // no hace falta tiempo real ahí (crear un viaje nuevo navega a otra URL).
 
 import { getStore } from '../data/store.js';
-import { el, renderErrorBanner, renderMessageScreen, escapeHtml, appUrl } from './components.js';
+import {
+  el,
+  renderErrorBanner,
+  renderMessageScreen,
+  escapeHtml,
+  appUrl,
+  renderShareBox,
+  shareableUrl,
+} from './components.js';
 
 export async function renderGroup(app, groupId) {
   app.innerHTML = '';
@@ -41,7 +49,7 @@ export async function renderGroup(app, groupId) {
 
   const myUid = await store.getMyId();
   const isOwner = group.ownerUid === myUid;
-  const groupUrl = `${location.origin}${location.pathname}?g=${encodeURIComponent(groupId)}`;
+  const groupUrl = shareableUrl(`g=${encodeURIComponent(groupId)}`);
 
   let members = [];
   let gotFirstSnapshot = false;
@@ -144,17 +152,14 @@ export async function renderGroup(app, groupId) {
         <div class="eyebrow">GRUPO</div>
         <div id="titleSlot"></div>
         <div id="bannerSlot"></div>
-        ${
-          myMembership
-            ? `<div class="shareBox" style="margin-bottom:24px;">
-                 <input type="text" readonly value="${escapeHtml(groupUrl)}">
-                 <button type="button" id="copyBtn">Copiar enlace</button>
-               </div>`
-            : ''
-        }
+        ${myMembership ? '<div id="shareSlot" style="margin-bottom:24px;"></div>' : ''}
         <div id="bodySlot"></div>
       </div>`);
     app.appendChild(view);
+
+    if (myMembership) {
+      view.querySelector('#shareSlot').appendChild(renderShareBox(groupUrl));
+    }
 
     if (transientError) {
       view.querySelector('#bannerSlot').appendChild(renderErrorBanner(transientError));
@@ -197,7 +202,6 @@ export async function renderGroup(app, groupId) {
       </form>`);
       form.addEventListener('submit', onJoinSubmit);
       bodySlot.appendChild(form);
-      view.querySelector('#copyBtn')?.addEventListener('click', () => copyLink(view, groupUrl));
       return;
     }
 
@@ -209,8 +213,6 @@ export async function renderGroup(app, groupId) {
     const leaveBtn = el(`<button type="button" class="ghost small" style="margin-top:20px;" ${busy ? 'disabled' : ''}>Salir del grupo</button>`);
     leaveBtn.addEventListener('click', onLeaveGroup);
     bodySlot.appendChild(leaveBtn);
-
-    view.querySelector('#copyBtn')?.addEventListener('click', () => copyLink(view, groupUrl));
   }
 }
 
@@ -273,17 +275,4 @@ function renderMembersSection(members, { myUid, isOwner, busy, onRemove }) {
     rows.appendChild(row);
   }
   return section;
-}
-
-function copyLink(view, url) {
-  const btn = view.querySelector('#copyBtn');
-  navigator.clipboard
-    .writeText(url)
-    .then(() => {
-      btn.textContent = 'Copiado ✓';
-      setTimeout(() => (btn.textContent = 'Copiar enlace'), 1500);
-    })
-    .catch(() => {
-      btn.textContent = 'No se pudo copiar';
-    });
 }

@@ -90,8 +90,14 @@ button.ghost.small { font-size: 13px; padding: 8px 14px; margin-top: 8px; }
 
 /* Pantalla "compartir enlace" tras crear un tablero */
 .shareBox { display: flex; gap: 8px; align-items: stretch; flex-wrap: wrap; }
-.shareBox input { flex: 1 1 200px; min-width: 0; font-family: 'IBM Plex Mono', monospace; font-size: 13px; }
-.shareBox button { white-space: nowrap; flex-shrink: 0; }
+.boardShare { margin-bottom: 16px; }
+/* 16px y no menos: por debajo de eso, Safari en iOS hace zoom al enfocar el
+   campo y deja la página descuadrada. */
+.shareBox input { flex: 1 1 200px; min-width: 0; font-family: 'IBM Plex Mono', monospace; font-size: 16px; }
+/* `line-height` fijo a propósito: el botón cambia a "Copiado \2713" al pulsarlo
+   y ese glifo hace la caja de línea 2px más alta, lo que empuja hacia abajo
+   todo lo que va debajo (en el tablero, el calendario). Medido con Playwright. */
+.shareBox button { white-space: nowrap; flex-shrink: 0; line-height: 1.2; }
 
 .notFoundBox { text-align: center; padding: 64px 24px; }
 .notFoundBox a { color: var(--full); font-weight: 600; }
