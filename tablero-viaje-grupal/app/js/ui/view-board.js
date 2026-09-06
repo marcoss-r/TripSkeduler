@@ -20,15 +20,45 @@
 // confirmación doble (dos `confirm()` con mensajes distintos) por ser
 // irreversible y afectar a todo el grupo, no solo a quien pulsa el botón.
 //
+// v3 (tras feedback de uso real). Tres cambios, los tres sobre lo mismo:
+// que marcar disponibilidad deje de dar saltos y se pueda hacer con el
+// dedo.
+//
+// 1. NADA DE REDIBUJAR LA PÁGINA ENTERA AL MARCAR. Antes, cada pulsación
+//    disparaba tres `draw()` seguidos (marcar → guardando → guardado) y
+//    `draw()` hace `app.innerHTML = ''`: se rehacía el <h1> (repitiendo su
+//    animación de entrada, de ahí que el título "subiera y bajara") y el
+//    indicador "Guardando…" aparecía y desaparecía, cambiando el ancho de
+//    la cabecera hasta hacerla saltar a dos líneas con flex-wrap y
+//    empujando el calendario entero arriba y abajo. Ahora el estado de
+//    guardado vive en un hueco de tamaño FIJO que siempre está ahí
+//    ("Guardando…" / "Cambios guardados"), y marcar días solo actualiza en
+//    el sitio lo que cambia (`refreshLive`), sin destruir el DOM.
+//
+// 2. ARRASTRE CON EL DEDO. El arrastre para marcar un rango era solo de
+//    ratón (`mouseenter` no existe al arrastrar el dedo). Ahora va con
+//    eventos de puntero, que unifican ratón y táctil, resolviendo la
+//    casilla bajo el dedo con `elementFromPoint` — `pointermove` no
+//    dispara nada al entrar en otro elemento, así que hay que preguntarlo.
+//    Dos detalles imprescindibles: `touch-action: none` en la rejilla (si
+//    no, el navegador se queda el gesto para hacer scroll y no llega ni un
+//    solo evento) y soltar la captura implícita del puntero táctil (si no,
+//    todos los `pointermove` van a la casilla donde empezó el gesto).
+//
+// 3. SELECTOR DE MES. Con rangos largos el calendario era una tira
+//    vertical enorme que obligaba a hacer scroll, y el scroll es
+//    justamente lo que compite con el arrastre en móvil. Se muestra un mes
+//    cada vez, con un desplegable (y flechas) para cambiar de mes; queda
+//    la opción "Todos los meses" para quien quiera la vista completa. La
+//    puntuación, la mejor ventana y las alternativas se siguen calculando
+//    sobre TODO el rango, no sobre el mes visible.
+//
 // Backlog (Fase 12), añadido a petición explícita:
-// - "Marcar rango" arrastrando: mousedown en un día + arrastrar + soltar
+// - "Marcar rango" arrastrando: pointerdown en un día + arrastrar + soltar
 //   pinta todo el rango recorrido con el mismo estado (el siguiente en el
 //   ciclo respecto al día donde empezó el arrastre). Un simple clic sin
 //   arrastrar es un caso particular (rango de un solo día) — es el mismo
-//   mecanismo de antes, no un modo aparte. Solo con ratón: en móvil no hay
-//   `mouseenter` al arrastrar el dedo, así que ahí se sigue tocando día a
-//   día (los eventos de ratón "sintéticos" que sí dispara un tap dan un
-//   rango de 1 día, o sea el ciclo normal).
+//   mecanismo de antes, no un modo aparte.
 // - Ponderar participantes: el dueño puede marcar a alguien como "cuenta
 //   doble" (`board.weights[uid] = 2`); solo afecta a la puntuación de
 //   `computeScores`, nunca al desglose de disponibilidad por persona.
@@ -37,7 +67,7 @@
 //   principal.
 
 import { getStore } from '../data/store.js';
-import { dateRangeArray, isValidRange, MAX_RANGE_DAYS, monthShort, dayNum, groupByMonth, mondayIndex } from '../core/dates.js';
+import { dateRangeArray, isValidRange, MAX_RANGE_DAYS, monthShort, dayNum, groupByMonth, mondayIndex, fmtDate } from '../core/dates.js';
 import { computeScores, bestWindow, topWindows } from '../core/scoring.js';
 import { el, debounce, renderErrorBanner, appUrl } from './components.js';
 
@@ -58,6 +88,17 @@ const MONTHS_LONG_ES = [
   'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',
 ];
 
+// Hueco de estado de guardado. Siempre visible y siempre del mismo tamaño
+// (ver el punto 1 del encabezado): el texto cambia, la caja no.
+const SAVE_LABEL = {
+  idle: '',
+  saving: 'Guardando…',
+  saved: 'Cambios guardados',
+  error: 'Sin guardar',
+};
+
+const ALL_MONTHS = 'all';
+
 export async function renderBoard(app, board) {
   const store = await getStore();
   const boardId = board.boardId;
@@ -69,11 +110,13 @@ export async function renderBoard(app, board) {
   let groupMembers = null; // solo si board.groupId; sirve para "quién falta por responder" (Fase 9)
   let weights = { ...(board.weights || {}) }; // uid -> 2 si "cuenta doble" (backlog Fase 12); ausente = 1
   let pendingDays = null; // override optimista de mis propios días mientras el guardado está en curso
-  let saving = false;
+  let saveState = 'idle'; // idle | saving | saved | error
   let gotFirstSnapshot = false;
   let transientError = null;
   let editingBoard = false;
   let boardBusy = false; // deshabilita las acciones de creador mientras hay una escritura en curso
+  let container = null; // raíz de la última pintada completa; refreshLive actualiza dentro de ella
+  let visibleMonth = null; // 'YYYY-MM' o ALL_MONTHS; se decide en la primera pintada
 
   // Estado del arrastre "marcar rango" (backlog Fase 12) — ver la nota del
   // encabezado del fichero.
@@ -82,25 +125,40 @@ export async function renderBoard(app, board) {
   let dragStartIdx = null;
   let dragCurrentIdx = null;
   let dragStatus = null;
+  let activePointerId = null; // ignora punteros secundarios (segundo dedo) durante un arrastre
 
   app.innerHTML = '';
   app.appendChild(el('<div class="loading">Cargando tablero…</div>'));
 
   const scheduleSave = debounce(async (name, days) => {
-    saving = true;
-    draw();
+    setSaveState('saving');
+    const hadError = transientError !== null;
     try {
       await store.saveMyResponse(boardId, { name, days });
       transientError = null;
+      setSaveState('saved');
     } catch (err) {
       console.error(err);
       transientError = 'No se pudo guardar tu disponibilidad. Vuelve a marcar el último día.';
+      setSaveState('error');
     } finally {
-      saving = false;
       pendingDays = null; // ya coincide con lo persistido, o se reintentará con el próximo clic
-      draw();
+      // Solo se repinta entero si aparece o desaparece el aviso de error,
+      // que es lo único que cambia la estructura de la página. En el caso
+      // normal basta con reconciliar los datos en el sitio: así marcar un
+      // día no mueve nada de lo que hay alrededor.
+      if (hadError !== (transientError !== null)) draw();
+      else refreshLive();
     }
   }, 400);
+
+  function setSaveState(next) {
+    saveState = next;
+    const node = container && container.querySelector('#saveState');
+    if (!node) return;
+    node.className = `saveState ${next}`;
+    node.textContent = SAVE_LABEL[next];
+  }
 
   function myResponse() {
     return responses.find((r) => r.uid === myUid) || { uid: myUid, name: '', days: {} };
@@ -138,14 +196,18 @@ export async function renderBoard(app, board) {
   // debería pasar en el flujo normal de main.js, pero es una salvaguarda
   // barata), se limpia la suscripción anterior antes de dejar activa la
   // nueva.
-  window.addEventListener('mouseup', onDragEnd);
+  window.addEventListener('pointermove', onPointerMove);
+  window.addEventListener('pointerup', onPointerFinish);
+  window.addEventListener('pointercancel', onPointerFinish);
 
   const previousCleanup = app._viewBoardCleanup;
   if (previousCleanup) previousCleanup();
   app._viewBoardCleanup = () => {
     unsubscribe();
     if (unsubscribeMembers) unsubscribeMembers();
-    window.removeEventListener('mouseup', onDragEnd);
+    window.removeEventListener('pointermove', onPointerMove);
+    window.removeEventListener('pointerup', onPointerFinish);
+    window.removeEventListener('pointercancel', onPointerFinish);
   };
 
   // --- "marcar rango" arrastrando (backlog Fase 12) --------------------------
@@ -155,11 +217,11 @@ export async function renderBoard(app, board) {
   // recuerda en dragStatus para todo el arrastre — así se pinta el rango
   // entero con UN estado, no se re-cicla casilla a casilla. dragEnter va
   // recalculando el rango [inicio, actual] sobre el índice en `dates` (no
-  // sobre el orden en que el ratón disparó los eventos), para no perder
-  // días si el cursor se mueve rápido y se salta alguna casilla. Un clic
-  // simple es el caso degenerado: mousedown+mouseup sin ningún mouseenter
-  // de por medio, rango de longitud 1 — el mismo resultado que el ciclo de
-  // toda la vida.
+  // sobre el orden en que el puntero disparó los eventos), para no perder
+  // días si se mueve rápido y se salta alguna casilla. Un clic simple es el
+  // caso degenerado: pointerdown+pointerup sin ningún movimiento de por
+  // medio, rango de longitud 1 — el mismo resultado que el ciclo de toda la
+  // vida.
 
   function dragRangeDates() {
     const lo = Math.min(dragStartIdx, dragCurrentIdx);
@@ -175,29 +237,29 @@ export async function renderBoard(app, board) {
 
   function onDragStart(day) {
     if (dragging) return;
+    const idx = dates.indexOf(day);
+    if (idx === -1) return;
     dragging = true;
     dragBaseDays = { ...myDays() };
-    dragStartIdx = dates.indexOf(day);
-    dragCurrentIdx = dragStartIdx;
+    dragStartIdx = idx;
+    dragCurrentIdx = idx;
     const current = dragBaseDays[day] || 'none';
     dragStatus = STATUS_ORDER[(STATUS_ORDER.indexOf(current) + 1) % STATUS_ORDER.length];
     applyDragPreview();
-    draw();
+    // En cuanto se toca un día ya hay cambios sin guardar: decirlo aquí
+    // evita que el hueco siga diciendo "Cambios guardados" durante los
+    // 400 ms de debounce, que sería mentira.
+    setSaveState('saving');
+    refreshLive();
   }
 
   function onDragEnter(day) {
     if (!dragging) return;
     const idx = dates.indexOf(day);
-    // Guarda importante: draw() destruye y reconstruye todas las casillas,
-    // así que el navegador vuelve a disparar `mouseenter` sobre la casilla
-    // recién creada que queda bajo un cursor que ni se ha movido — sin este
-    // corte de caso ("misma casilla que ya teníamos") eso realimenta un
-    // draw() tras otro sin fin (comprobado con Playwright: el calendario
-    // quedaba redibujándose para siempre en cuanto empezaba un arrastre).
-    if (idx === dragCurrentIdx) return;
+    if (idx === -1 || idx === dragCurrentIdx) return; // misma casilla: nada que recalcular
     dragCurrentIdx = idx;
     applyDragPreview();
-    draw();
+    refreshLive();
   }
 
   function onDragEnd() {
@@ -209,6 +271,24 @@ export async function renderBoard(app, board) {
     dragCurrentIdx = null;
     dragStatus = null;
     scheduleSave(myResponse().name, finalDays);
+  }
+
+  // `pointermove` no avisa de que el puntero ha entrado en otro elemento
+  // (no hay equivalente de `mouseenter` que sirva mientras se arrastra el
+  // dedo), así que se resuelve a mano qué casilla hay debajo. Los
+  // escuchadores van en `window` y no en la casilla: el gesto no debe
+  // cortarse por salirse de la rejilla ni por un repintado.
+  function onPointerMove(e) {
+    if (!dragging || (activePointerId !== null && e.pointerId !== activePointerId)) return;
+    const under = document.elementFromPoint(e.clientX, e.clientY);
+    const cell = under && under.closest ? under.closest('.calDay[data-day]') : null;
+    if (cell) onDragEnter(cell.dataset.day);
+  }
+
+  function onPointerFinish(e) {
+    if (activePointerId !== null && e.pointerId !== activePointerId) return;
+    activePointerId = null;
+    onDragEnd();
   }
 
   function toggleEditBoard() {
@@ -316,8 +396,67 @@ export async function renderBoard(app, board) {
     }
   }
 
+  // --- selector de mes -------------------------------------------------------
+
+  function monthKey({ year, month }) {
+    return `${year}-${String(month + 1).padStart(2, '0')}`;
+  }
+
+  /** Mes que conviene mostrar de entrada: el primero que aún tiene días por venir. */
+  function defaultMonth(months) {
+    if (months.length <= 1) return ALL_MONTHS;
+    const today = fmtDate(new Date());
+    const upcoming = months.find((m) => m.dates[m.dates.length - 1] >= today);
+    return monthKey(upcoming || months[0]);
+  }
+
+  function setVisibleMonth(next) {
+    visibleMonth = next;
+    draw();
+  }
+
+  function drawMonthPicker(slot, months) {
+    if (months.length <= 1) return; // un solo mes: el desplegable solo estorbaría
+
+    const idx = months.findIndex((m) => monthKey(m) === visibleMonth);
+    const picker = el(`<div class="monthPicker">
+      <label for="monthSelect">MES</label>
+      <select id="monthSelect">
+        ${months
+          .map((m) => {
+            const key = monthKey(m);
+            const label = `${MONTHS_LONG_ES[m.month]} ${m.year}`;
+            return `<option value="${key}" ${key === visibleMonth ? 'selected' : ''}>${label}</option>`;
+          })
+          .join('')}
+        <option value="${ALL_MONTHS}" ${visibleMonth === ALL_MONTHS ? 'selected' : ''}>Todos los meses</option>
+      </select>
+      <span class="monthNav">
+        <button type="button" class="ghost small" id="prevMonthBtn" aria-label="Mes anterior" ${idx <= 0 ? 'disabled' : ''}>‹</button>
+        <button type="button" class="ghost small" id="nextMonthBtn" aria-label="Mes siguiente" ${idx === -1 || idx >= months.length - 1 ? 'disabled' : ''}>›</button>
+      </span>
+    </div>`);
+
+    picker.querySelector('#monthSelect').addEventListener('change', (e) => setVisibleMonth(e.target.value));
+    picker.querySelector('#prevMonthBtn').addEventListener('click', () => setVisibleMonth(monthKey(months[idx - 1])));
+    picker.querySelector('#nextMonthBtn').addEventListener('click', () => setVisibleMonth(monthKey(months[idx + 1])));
+    slot.appendChild(picker);
+  }
+
+  // --- pintado ---------------------------------------------------------------
+
   function draw() {
     if (!gotFirstSnapshot) return; // se queda con el "Cargando tablero…" hasta el primer snapshot
+    // Un snapshot remoto (otra persona marcando a la vez) no puede
+    // destruir el DOM en mitad de un arrastre: se reconcilia en el sitio.
+    if (dragging) return refreshLive();
+
+    const months = groupByMonth(dates);
+    // El mes elegido puede haber dejado de existir si el creador acaba de
+    // recortar el rango de fechas.
+    if (visibleMonth === null || (visibleMonth !== ALL_MONTHS && !months.some((m) => monthKey(m) === visibleMonth))) {
+      visibleMonth = defaultMonth(months);
+    }
 
     const currentResponses = effectiveResponses();
     const { scores, breakdown } = computeScores(dates, weightedResponses(currentResponses));
@@ -325,7 +464,7 @@ export async function renderBoard(app, board) {
     const top = topWindows(dates, scores, breakdown, board.tripLength, 3);
 
     app.innerHTML = '';
-    const container = el(`<div class="wrap wide">
+    container = el(`<div class="wrap wide boardView">
       <div class="boardNav">
         <a href="${appUrl()}">← Mis viajes</a>
         ${board.groupId ? `<a href="${appUrl(`g=${encodeURIComponent(board.groupId)}`)}">← Grupo</a>` : ''}
@@ -335,9 +474,9 @@ export async function renderBoard(app, board) {
           <div class="eyebrow">${escapeHtml(board.tripName.toUpperCase())}</div>
           <h1>Tablero de disponibilidad</h1>
         </div>
-        <div>
+        <div class="boardHeaderRight">
           <div class="sub" style="margin-bottom:4px;">Eres <strong>${escapeHtml(myResponse().name)}</strong></div>
-          <span class="savingIndicator ${saving ? 'visible' : ''}">${saving ? 'Guardando…' : ''}</span>
+          <span class="saveState ${saveState}" id="saveState" role="status" aria-live="polite">${SAVE_LABEL[saveState]}</span>
         </div>
       </div>
       ${isOwner ? '<div id="ownerSlot"></div>' : ''}
@@ -348,8 +487,9 @@ export async function renderBoard(app, board) {
         <span><i class="dot partial"></i>Parcial</span>
         <span><i class="dot unavailable"></i>No disponible</span>
         <span><i class="dot none"></i>No definido</span>
-        <span>· el número bajo cada día es la puntuación del grupo · arrastra sobre varios días para marcarlos a la vez</span>
+        <span>· el número bajo cada día es la puntuación del grupo · arrastra el dedo o el ratón sobre varios días para marcarlos de una vez</span>
       </div>
+      <div id="monthSlot"></div>
       <div class="calendar"></div>
       <div class="bestBox"></div>
       <div class="altWindows"></div>
@@ -385,10 +525,37 @@ export async function renderBoard(app, board) {
       }
     }
 
-    drawCalendar(container.querySelector('.calendar'), { dates, scores, breakdown, best });
+    drawMonthPicker(container.querySelector('#monthSlot'), months);
+    drawCalendar(container.querySelector('.calendar'), { months, scores, breakdown, best, totalResponses: currentResponses.length });
     drawBestBox(container.querySelector('.bestBox'), { best, responses: currentResponses });
     drawAlternatives(container.querySelector('.altWindows'), { top });
     drawRoster(container.querySelector('.roster'), { dates, responses: currentResponses, myUid });
+  }
+
+  /**
+   * Reconcilia en el sitio todo lo que depende de las respuestas (colores
+   * de las casillas, puntuaciones, mejor ventana, alternativas y roster)
+   * SIN tocar la estructura de la página. Es lo que se usa mientras se
+   * marca: la alternativa era `draw()`, y rehacer el DOM entero en cada
+   * casilla es exactamente lo que hacía saltar el título y el calendario.
+   */
+  function refreshLive() {
+    if (!container) return draw();
+
+    const currentResponses = effectiveResponses();
+    const { scores, breakdown } = computeScores(dates, weightedResponses(currentResponses));
+    const best = bestWindow(dates, scores, breakdown, board.tripLength);
+    const top = topWindows(dates, scores, breakdown, board.tripLength, 3);
+    const ctx = { scores, breakdown, best, totalResponses: currentResponses.length };
+
+    for (const cell of container.querySelectorAll('.calDay[data-day]')) {
+      updateDayCell(cell, cell.dataset.day, ctx);
+    }
+    drawBestBox(container.querySelector('.bestBox'), { best, responses: currentResponses });
+    drawAlternatives(container.querySelector('.altWindows'), { top });
+    const rosterEl = container.querySelector('.roster');
+    rosterEl.innerHTML = '';
+    drawRoster(rosterEl, { dates, responses: currentResponses, myUid });
   }
 
   function drawOwnerBar(ownerSlot) {
@@ -427,9 +594,9 @@ export async function renderBoard(app, board) {
     ownerSlot.appendChild(bar);
   }
 
-  function drawCalendar(calendarEl, { dates, scores, breakdown, best }) {
-    const totalResponses = effectiveResponses().length;
-    for (const { year, month, dates: monthDates } of groupByMonth(dates)) {
+  function drawCalendar(calendarEl, { months, scores, breakdown, best, totalResponses }) {
+    const shown = visibleMonth === ALL_MONTHS ? months : months.filter((m) => monthKey(m) === visibleMonth);
+    for (const { year, month, dates: monthDates } of shown) {
       const monthBlock = el(`<div class="calMonth">
         <div class="calMonthTitle">${MONTHS_LONG_ES[month].toUpperCase()} ${year}</div>
         <div class="calWeekdays">${WEEKDAYS_MON_FIRST.map((w) => `<span>${w}</span>`).join('')}</div>
@@ -448,32 +615,62 @@ export async function renderBoard(app, board) {
     }
   }
 
-  function makeDayCell(day, { scores, breakdown, best, totalResponses }) {
-    const myStatus = myDays()[day] || 'none';
-    const inBest = best && day >= best.start && day <= best.end;
-    const score = scores[day] || 0;
-    const badge = totalResponses > 0 ? `${formatScore(score)}/${totalResponses}` : '';
-    const bd = breakdown[day];
-    const tooltip = `${dayNum(day)} de ${MONTHS_LONG_ES[monthOf(day)]}: tú — ${STATUS_LABEL[myStatus]}. Grupo: ${bd.full} disponible · ${bd.partial} parcial · ${bd.unavailable} no disponible · ${bd.none} sin marcar.`;
-    const label = `${tooltip} Toca para cambiar tu disponibilidad.`;
-
+  function makeDayCell(day, ctx) {
     const btn = el(
-      `<button type="button" class="calDay ${myStatus} ${inBest ? 'inBest' : ''}" title="${escapeHtml(tooltip)}" aria-label="${escapeHtml(label)}">
+      `<button type="button" class="calDay" data-day="${day}">
         <span class="calDayNum">${dayNum(day)}</span>
-        ${badge ? `<span class="calDayBadge">${badge}</span>` : ''}
+        <span class="calDayBadge"></span>
       </button>`
     );
-    // mousedown+mouseenter+mouseup(global), no click: así un arrastre pinta
-    // todo el rango con un solo estado en vez de ciclar casilla a casilla.
-    // Un clic normal (sin arrastrar) es un rango de 1 día — mismo resultado
-    // de siempre. Ver la nota de cabecera del fichero sobre por qué no hay
-    // soporte de arrastre táctil.
-    btn.addEventListener('mousedown', (e) => {
-      e.preventDefault(); // evita selección de texto nativa al arrastrar
+    updateDayCell(btn, day, ctx);
+
+    // pointerdown + pointermove global + pointerup, no click: así un
+    // arrastre pinta todo el rango con un solo estado en vez de ciclar
+    // casilla a casilla, y funciona igual con ratón que con el dedo.
+    btn.addEventListener('pointerdown', (e) => {
+      if (e.button > 0) return; // botón derecho / central: no marca nada
+      e.preventDefault(); // evita la selección de texto nativa al arrastrar
+      // El navegador captura implícitamente el puntero TÁCTIL sobre la
+      // casilla donde empieza el gesto: sin soltarlo, todos los
+      // `pointermove` seguirían llegando a ESTA casilla y `elementFromPoint`
+      // nunca vería las demás. Es la diferencia entre que el arrastre con el
+      // dedo funcione o no.
+      if (btn.hasPointerCapture && btn.hasPointerCapture(e.pointerId)) {
+        btn.releasePointerCapture(e.pointerId);
+      }
+      activePointerId = e.pointerId;
       onDragStart(day);
     });
-    btn.addEventListener('mouseenter', () => onDragEnter(day));
+
+    // Teclado: `pointerdown` no lo dispara Intro/Espacio, así que sin esto
+    // las casillas no se podían marcar sin ratón (lo mismo pasaba antes con
+    // `mousedown`). Hay que distinguirlo del `click` que el navegador
+    // sintetiza detrás de cada toque o clic real, o cada pulsación contaría
+    // dos veces: en ese caso `pointerType` viene con 'touch'/'mouse', y en
+    // el del teclado con la cadena vacía. `detail` es el respaldo para
+    // navegadores donde `click` no llega como PointerEvent.
+    btn.addEventListener('click', (e) => {
+      const desdePuntero = typeof e.pointerType === 'string' ? e.pointerType !== '' : e.detail !== 0;
+      if (desdePuntero) return;
+      onDragStart(day);
+      onDragEnd();
+    });
     return btn;
+  }
+
+  /** Actualiza una casilla ya existente: color, tooltip y puntuación del grupo. */
+  function updateDayCell(btn, day, { scores, breakdown, best, totalResponses }) {
+    const myStatus = myDays()[day] || 'none';
+    const inBest = best && day >= best.start && day <= best.end;
+    btn.className = `calDay ${myStatus}${inBest ? ' inBest' : ''}`;
+
+    const bd = breakdown[day];
+    const tooltip = `${dayNum(day)} de ${MONTHS_LONG_ES[monthOf(day)]}: tú — ${STATUS_LABEL[myStatus]}. Grupo: ${bd.full} disponible · ${bd.partial} parcial · ${bd.unavailable} no disponible · ${bd.none} sin marcar.`;
+    btn.title = tooltip;
+    btn.setAttribute('aria-label', `${tooltip} Actívalo para cambiar tu disponibilidad.`);
+
+    const badge = btn.querySelector('.calDayBadge');
+    badge.textContent = totalResponses > 0 ? `${formatScore(scores[day] || 0)}/${totalResponses}` : '';
   }
 
   function drawBestBox(bestBox, { best, responses: currentResponses }) {

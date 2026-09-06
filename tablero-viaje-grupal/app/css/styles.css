@@ -52,9 +52,34 @@ button.ghost.small { font-size: 13px; padding: 8px 14px; margin-top: 8px; }
 .banner { border-radius: 8px; padding: 12px 16px; font-size: 13px; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
 .banner.error { background: rgba(232,92,74,0.12); border: 1px solid var(--danger); color: var(--ink); }
 .banner.info { background: rgba(79,182,166,0.12); border: 1px solid var(--ok); color: var(--ink); }
-.savingIndicator { font-size: 12px; color: var(--ink-dim); font-family: 'IBM Plex Mono', monospace; display: inline-flex; align-items: center; gap: 6px; min-height: 16px; }
-.savingIndicator.visible::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--full); animation: pulse 1s ease infinite; }
+/* Estado de guardado del tablero. La clave es que el hueco SIEMPRE está
+   ahí y siempre mide lo mismo (min-width cabe el texto más largo, "Cambios
+   guardados"). Antes el indicador aparecía y desaparecía en cada
+   pulsación: la cabecera cambiaba de ancho, con flex-wrap saltaba a dos
+   líneas, y el título y el calendario entero subían y bajaban. */
+.saveState {
+  /* `flex` y no `inline-flex`: como caja en línea, el hueco vacío y el
+     hueco con texto se alineaban por líneas base distintas y la cabecera
+     medía 5px más en un caso que en otro. */
+  display: flex; align-items: center; justify-content: flex-end; gap: 6px;
+  /* alto FIJO, no min-height: con min-height la caja vacía y la caja con
+     texto no medían igual y el calendario seguía moviéndose unos píxeles. */
+  min-width: 150px; height: 20px; line-height: 1;
+  font-size: 12px; color: var(--ink-dim); font-family: 'IBM Plex Mono', monospace;
+  white-space: nowrap;
+}
+.saveState::before { flex: none; }
+.saveState.saving::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--full); animation: pulse 1s ease infinite; }
+.saveState.saved { color: var(--ok); }
+.saveState.saved::before { content: '\2713'; }
+.saveState.error { color: var(--danger); }
+.saveState.error::before { content: '\26A0'; }
+.boardHeaderRight { text-align: right; margin-left: auto; }
 @keyframes pulse { 0%, 100% { opacity: .3; } 50% { opacity: 1; } }
+
+/* El <h1> del tablero se reconstruye cada vez que llega un snapshot: repetir
+   ahí la animación de entrada hacía que el título "saltara" solo. */
+.boardView h1 { animation: none; }
 
 /* Pantalla "compartir enlace" tras crear un tablero */
 .shareBox { display: flex; gap: 8px; align-items: stretch; flex-wrap: wrap; }
@@ -93,15 +118,43 @@ button.calDay:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px
 .calDayNum { font-size: 13px; font-weight: 600; line-height: 1; }
 .calDayBadge { font-size: 10px; font-family: 'IBM Plex Mono', monospace; opacity: .85; line-height: 1; }
 @media (max-width: 480px) {
+  /* En pantalla estrecha la cabecera se apila; el estado de guardado se
+     alinea a la izquierda como el resto del contenido en vez de quedar
+     descolgado en mitad de la línea. */
+  .boardHeader { flex-direction: column; align-items: stretch; gap: 4px; }
+  .boardHeaderRight { text-align: left; margin-left: 0; }
+  .saveState { justify-content: flex-start; }
+  /* En móvil el nombre y las estadísticas del participante no caben en la
+     misma línea y se solapaban. */
+  .rosterRow { flex-direction: column; align-items: flex-start; gap: 6px; }
   .calDay { border-radius: 6px; }
   .calDayNum { font-size: 11px; }
   .calDayBadge { font-size: 9px; }
 }
 
-/* "Marcar rango" arrastrando (backlog Fase 12): evita que el navegador
-   seleccione el texto de las casillas como si fuera texto normal mientras
-   se arrastra el ratón sobre ellas. */
-.calDays { user-select: none; }
+/* "Marcar rango" arrastrando (backlog Fase 12).
+   - `user-select: none` evita que el navegador seleccione el texto de las
+     casillas como si fuera texto normal mientras se arrastra por encima.
+   - `touch-action: none` es lo que hace que el arrastre CON EL DEDO
+     funcione: por defecto el navegador se queda el gesto vertical para
+     hacer scroll y la app no recibe ni un solo `pointermove`. Por eso
+     antes en móvil solo se podía marcar día a día. Para hacer scroll se
+     desliza fuera de la rejilla, y el selector de mes de abajo mantiene el
+     calendario corto justamente para que eso casi nunca haga falta. */
+.calDays { user-select: none; -webkit-user-select: none; touch-action: none; }
+.calDay { touch-action: none; -webkit-tap-highlight-color: transparent; }
+
+/* Selector de mes: un mes cada vez en vez de una tira vertical de hasta
+   seis, que obligaba a un scroll largo y competía con el arrastre. */
+.monthPicker { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
+.monthPicker label { flex-direction: row; align-items: center; font-family: 'IBM Plex Mono', monospace; font-size: 12px; letter-spacing: 0.08em; }
+.monthPicker select {
+  background: var(--bg); border: 1px solid rgba(255,255,255,0.12); border-radius: 6px;
+  padding: 9px 12px; color: var(--ink); font-family: 'Inter', sans-serif; font-size: 15px;
+}
+.monthPicker select:focus-visible { outline: 2px solid var(--full); outline-offset: 1px; }
+.monthNav { display: flex; gap: 6px; }
+.monthNav button { font-size: 16px; line-height: 1; padding: 8px 14px; }
 
 /* Lista compacta de participantes bajo el calendario */
 .roster { display: flex; flex-direction: column; gap: 8px; margin-top: 20px; }
