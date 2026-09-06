@@ -262,7 +262,14 @@ service cloud.firestore {
 
     // --- Grupos ------------------------------------------------------------
     match /groups/{groupId} {
-      allow read: if true;                       // el id no es adivinable
+      // `get` (leer un grupo cuyo id ya conoces) es público: el enlace es la
+      // credencial. `list` no: `allow read` cubre TAMBIÉN las consultas a la
+      // colección entera, así que un `read: if true` sin más dejaba volcar
+      // todos los grupos existentes sin conocer ningún enlace. La app nunca
+      // consulta la colección `groups` entera (usa el índice privado
+      // users/{uid}/groups), así que `list` se deniega sin más.
+      allow get: if true;
+      allow list: if false;
 
       allow create: if isSignedIn()
         && request.resource.data.keys().hasOnly(['name','ownerUid','createdAt'])
@@ -283,7 +290,12 @@ service cloud.firestore {
 
     // --- Tableros ----------------------------------------------------------
     match /boards/{boardId} {
-      allow read: if true;
+      // Mismo razonamiento que en /groups: `get` público, `list` restringido
+      // a quien ya es miembro del grupo del tablero (la única consulta real
+      // de la app sobre esta colección). Los tableros sueltos (groupId ==
+      // null) no son listables nunca, solo accesibles por enlace directo.
+      allow get: if true;
+      allow list: if isSignedIn() && isGroupMember(resource.data.groupId);
 
       allow create: if isSignedIn()
         && request.resource.data.keys().hasOnly(
@@ -303,12 +315,15 @@ service cloud.firestore {
       // backlog Fase 12). Cualquier persona autenticada puede, además,
       // EXCLUSIVAMENTE empujar `expiresAt` hacia delante — así se marca
       // "actividad" para el TTL sin que solo el dueño pueda mantener vivo
-      // su propio tablero.
+      // su propio tablero. El `> request.time` es imprescindible: sin él,
+      // cualquiera con el enlace podría poner `expiresAt` en el pasado y
+      // provocar que el TTL de Firestore borrase el tablero de otra persona.
       allow update: if isSignedIn() && (
         resource.data.ownerUid == me()
         || (
           request.resource.data.diff(resource.data).affectedKeys().hasOnly(['expiresAt'])
           && request.resource.data.expiresAt is timestamp
+          && request.resource.data.expiresAt > request.time
         )
       );
       allow delete: if isSignedIn() && resource.data.ownerUid == me();
@@ -338,8 +353,12 @@ Dos limitaciones aceptadas, documéntalas en el código:
    barata. El enum (`none|unavailable|partial|full`) se valida en cliente. Peor caso: un
    valor basura en un tablero cuyo enlace ya se compartió. Aceptable para un
    grupo cerrado.
-2. `read: if true` en grupos y tableros: **el enlace es la credencial**. Quien
+2. `get: if true` en grupos y tableros: **el enlace es la credencial**. Quien
    tiene el id, ve. Es el mismo modelo que un Google Doc "con el enlace".
+   `list` sí está restringido (ver comentarios arriba): permitir `read` sin
+   más también habría permitido volcar la colección entera sin conocer
+   ningún enlace, un agujero real que se encontró y cerró en la revisión de
+   seguridad de Fase 12.
 
 ---
 
