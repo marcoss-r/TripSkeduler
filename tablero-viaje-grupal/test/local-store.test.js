@@ -225,3 +225,38 @@ test('listGroupBoards devuelve solo los tableros del grupo, no confunde claves d
   assert.equal(boards[0].boardId, boardInGroup);
   assert.equal(boards[0].tripName, 'Estocolmo');
 });
+
+test('getMyResponse: null antes de entrar, mi fila después', async () => {
+  const boardId = await localStore.createBoard({
+    tripName: 'Getaria',
+    startDate: '2026-05-01',
+    endDate: '2026-05-10',
+    tripLength: 3,
+  });
+
+  assert.equal(await localStore.getMyResponse(boardId), null);
+
+  await localStore.saveMyResponse(boardId, { name: 'Marcos', days: { '2026-05-02': 'full' } });
+
+  const mine = await localStore.getMyResponse(boardId);
+  const myUid = await localStore.getMyId();
+  assert.equal(mine.uid, myUid);
+  assert.equal(mine.name, 'Marcos');
+  assert.deepEqual(mine.days, { '2026-05-02': 'full' });
+});
+
+test('getMyResponse no ve la fila de otra persona', async () => {
+  const boardId = await localStore.createBoard({
+    tripName: 'Ordesa',
+    startDate: '2026-06-01',
+    endDate: '2026-06-10',
+    tripLength: 3,
+  });
+  // Fila de otro participante escrita directamente (como haría su navegador).
+  localStorage.setItem(
+    `tsk:board:${boardId}:resp:otro-uid`,
+    JSON.stringify({ name: 'Bea', days: {}, updatedAt: Date.now() })
+  );
+
+  assert.equal(await localStore.getMyResponse(boardId), null);
+});

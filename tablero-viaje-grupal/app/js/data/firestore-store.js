@@ -41,6 +41,7 @@ import {
 } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js';
 
 import { newId } from '../core/ids.js';
+import { ensureSignedIn } from './auth-session.js';
 
 /**
  * Crea el store de Firestore. Async porque espera a que la autenticación
@@ -52,7 +53,7 @@ export async function createFirestoreStore(firebaseConfig) {
   const auth = getAuth(app);
   const db = initFirestoreWithOfflinePersistence(app);
 
-  await ensureSignedIn(auth);
+  await ensureSignedIn(auth, { onAuthStateChanged, signInAnonymously });
 
   // Resultado pendiente de un `linkGoogleAccount()` que cayó al fallback de
   // `linkWithRedirect` (popup bloqueado) — ver consumeGoogleRedirectOutcome.
@@ -145,6 +146,12 @@ export async function createFirestoreStore(firebaseConfig) {
    *   { ok: false, cancelled: true }                                 -> el usuario cerró el popup, no es un error real
    */
   async function linkGoogleAccount() {
+    // Ya vinculada: no hay nada que hacer, y `linkWithPopup` fallaría con
+    // `provider-already-linked`. Puede pasar si dos pestañas abren el popup
+    // a la vez, o con una vista pintada antes de restaurarse la sesión.
+    if (!auth.currentUser.isAnonymous) {
+      return { ok: true, pending: false, merged: false, displayName: auth.currentUser.displayName, email: auth.currentUser.email };
+    }
     const provider = new GoogleAuthProvider();
     try {
       const result = await linkWithPopup(auth.currentUser, provider);
@@ -173,7 +180,7 @@ export async function createFirestoreStore(firebaseConfig) {
   /** Cierra sesión y vuelve a un anónimo limpio (uid nuevo, sin historial). */
   async function signOutToAnonymous() {
     await signOut(auth);
-    await ensureSignedIn(auth);
+    await ensureSignedIn(auth, { onAuthStateChanged, signInAnonymously });
   }
 
   /**
@@ -281,6 +288,18 @@ export async function createFirestoreStore(firebaseConfig) {
         if (onError) onError(err);
       }
     );
+  }
+
+  /**
+   * Mi fila en este tablero, o null si todavía no he entrado. Es una lectura
+   * puntual a propósito: la pregunta "¿ya estoy en este tablero?" no puede
+   * depender del primer evento de `subscribeResponses`, que con la caché
+   * offline activada puede llegar vacío desde disco antes de que conteste el
+   * servidor — y ese vacío se leía como "no estás" y volvía a pedir el nombre.
+   */
+  async function getMyResponse(boardId) {
+    const snap = await getDoc(doc(db, 'boards', boardId, 'responses', myUid()));
+    return snap.exists() ? { uid: snap.id, ...snap.data() } : null;
   }
 
   async function saveMyResponse(boardId, { name, days }) {
@@ -414,6 +433,7 @@ export async function createFirestoreStore(firebaseConfig) {
     deleteBoard,
     subscribeBoard,
     subscribeResponses,
+    getMyResponse,
     saveMyResponse,
     deleteResponse,
     listMyBoards,
@@ -444,26 +464,4 @@ function initFirestoreWithOfflinePersistence(app) {
     console.warn('No se pudo habilitar la persistencia offline de Firestore:', err);
     return getFirestore(app);
   }
-}
-
-function ensureSignedIn(auth) {
-  return new Promise((resolve, reject) => {
-    const unsubscribe = onAuthStateChanged(
-      auth,
-      (user) => {
-        if (user) {
-          unsubscribe();
-          resolve(user);
-        }
-      },
-      (err) => {
-        unsubscribe();
-        reject(err);
-      }
-    );
-    signInAnonymously(auth).catch((err) => {
-      unsubscribe();
-      reject(err);
-    });
-  });
 }

@@ -19,6 +19,7 @@
 //   deleteBoard(boardId)                       -> Promise<void>
 //   subscribeBoard(boardId, cb, onError?)      -> unsubscribe()
 //   subscribeResponses(boardId, cb, onError?)  -> unsubscribe()
+//   getMyResponse(boardId)                     -> Promise<{uid,name,days}|null>
 //   saveMyResponse(boardId, {name, days})      -> Promise<void>
 //   deleteResponse(boardId, uid)               -> Promise<void>
 //
@@ -45,6 +46,12 @@
 // vez que alguien guarda una respuesta (marcar actividad para el TTL), así
 // que este callback se dispara constantemente; quien lo consuma debe
 // comparar los campos que de verdad muestra antes de repintar nada.
+//
+// `getMyResponse` responde a "¿ya estoy en este tablero?" con una lectura
+// puntual, y existe precisamente para no responderla con el primer evento
+// de `subscribeResponses`: con la caché offline de Firestore ese primer
+// evento puede llegar desde disco y vacío antes de que conteste el
+// servidor, y un vacío se lee como "no estás" y vuelve a pedir el nombre.
 //
 // `onError` en subscribeResponses/subscribeMembers es una extensión sobre
 // el diseño original (añadida al escribir firestore-store.js, Fase 5):

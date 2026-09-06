@@ -170,6 +170,13 @@ function subscribeResponses(boardId, cb) {
   return subscribeTopic(topic, emit);
 }
 
+/** Mi fila en este tablero, o null. Ver la nota en firestore-store.js. */
+async function getMyResponse(boardId) {
+  const uid = getMyIdSync();
+  const value = readJSON(`${PREFIX}board:${boardId}:resp:${uid}`);
+  return value ? { uid, ...value } : null;
+}
+
 async function saveMyResponse(boardId, { name, days }) {
   const uid = getMyIdSync();
   writeJSON(`${PREFIX}board:${boardId}:resp:${uid}`, {
@@ -301,6 +308,7 @@ export const localStore = {
   deleteBoard,
   subscribeBoard,
   subscribeResponses,
+  getMyResponse,
   saveMyResponse,
   deleteResponse,
 

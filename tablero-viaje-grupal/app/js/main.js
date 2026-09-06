@@ -59,10 +59,18 @@ async function handleBoard(boardId) {
   board = { ...board, boardId };
 
   const myUid = await store.getMyId();
-  const responses = await once((cb) => store.subscribeResponses(boardId, cb));
-  const alreadyJoined = responses.some((r) => r.uid === myUid);
+  // Lectura puntual de MI fila, no el primer evento de `subscribeResponses`:
+  // ese primer evento puede venir de la caché offline y llegar vacío, y un
+  // vacío aquí se traduce en volver a pedir el nombre en un tablero en el
+  // que ya estabas.
+  let myResponse = null;
+  try {
+    myResponse = await store.getMyResponse(boardId);
+  } catch (err) {
+    console.error(err);
+  }
 
-  if (alreadyJoined) {
+  if (myResponse) {
     renderBoard(app, board);
     return;
   }
