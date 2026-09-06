@@ -830,9 +830,29 @@ firebase deploy --only firestore:rules
 3. *Restricciones de aplicación* → **Sitios web** → añade:
    - `https://marcoss-r.github.io/*`
    - `http://localhost:8080/*`
+   - `https://tripskeduler.firebaseapp.com/*`
+   - `https://tripskeduler.web.app/*`
 4. Guardar.
 
 Evita que alguien copie tu clave y consuma tu cuota desde otro dominio.
+
+⚠️ **Los dos dominios de Firebase no son opcionales si se usa el login con
+Google.** El popup de Google no lo sirve la app: lo sirve
+`https://tripskeduler.firebaseapp.com/__/auth/handler` (el `authDomain` de
+`config.js`), y esa página usa *la misma* API key desde *ese* dominio. Si la
+clave solo permite `marcoss-r.github.io`, el handler recibe un 403
+(`API_KEY_HTTP_REFERRER_BLOCKED`) y el popup muestra **"The requested action
+is invalid"** — sin ningún error en la consola de la app, porque el fallo
+ocurre dentro del popup. La primera versión de esta acción listaba solo los
+dos primeros dominios: eso fue justo lo que rompió el login en producción.
+
+Comprobación rápida sin consola (debe listar los dominios autorizados y no
+un 403):
+
+```bash
+curl -s -H "Referer: https://tripskeduler.firebaseapp.com/" \
+  "https://identitytoolkit.googleapis.com/v1/projects?key=<API_KEY>"
+```
 
 **Confírmame:** "API key restringida" (o "lo dejo para luego").
 

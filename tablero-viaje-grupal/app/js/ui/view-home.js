@@ -8,6 +8,7 @@
 // rota simplemente se omite al listar, sin tocar el índice.
 
 import { getStore } from '../data/store.js';
+import { parseSharedLink } from '../core/parse-link.js';
 import { el, renderErrorBanner, renderInfoBanner, escapeHtml, appUrl } from './components.js';
 
 export async function renderHome(app) {
@@ -29,8 +30,10 @@ export async function renderHome(app) {
       <div class="homeActions">
         <button type="button" id="newBoardBtn">Crear viaje</button>
         <button type="button" class="ghost" id="newGroupBtn">Crear grupo</button>
+        <button type="button" class="ghost" id="openLinkBtn">Abrir un enlace</button>
       </div>
       <div id="createGroupSlot"></div>
+      <div id="openLinkSlot"></div>
       <div id="bannerSlot"></div>
 
       <section class="listSection">
@@ -52,7 +55,12 @@ export async function renderHome(app) {
     location.href = appUrl('crear=1');
   });
   view.querySelector('#newGroupBtn').addEventListener('click', () => {
+    view.querySelector('#openLinkSlot').innerHTML = '';
     renderCreateGroupForm(view.querySelector('#createGroupSlot'), store, profile);
+  });
+  view.querySelector('#openLinkBtn').addEventListener('click', () => {
+    view.querySelector('#createGroupSlot').innerHTML = '';
+    renderOpenLinkForm(view.querySelector('#openLinkSlot'));
   });
 
   renderAccountSection(view.querySelector('#accountSlot'), store, { isFirestore, authInfo });
@@ -163,6 +171,78 @@ function renderAccountSection(slot, store, { isFirestore, authInfo }) {
     }
   });
   slot.appendChild(box);
+}
+
+// "Abrir un enlace": pegar el enlace que te han pasado y entrar al tablero.
+//
+// Existe sobre todo para la app instalada en el móvil: ahí el enlace de
+// WhatsApp abre el navegador, no la app, y no había forma de meter un
+// tablero ajeno en la app instalada. Con esto se pega y ya.
+function renderOpenLinkForm(slot) {
+  slot.innerHTML = '';
+  const form = el(`
+    <form class="panel" id="openLinkForm">
+      <label>Pega aquí el enlace que te han pasado
+        <input type="text" name="link" inputmode="url" autocomplete="off" spellcheck="false"
+               placeholder="https://…/?b=abcdefghij" required>
+      </label>
+      <div id="openLinkError"></div>
+      <div class="ownerBarActions">
+        <button type="submit">Abrir</button>
+        <button type="button" class="ghost" id="pasteLinkBtn" hidden>Pegar del portapapeles</button>
+        <button type="button" class="ghost" id="cancelOpenLink">Cancelar</button>
+      </div>
+    </form>`);
+  slot.appendChild(form);
+
+  const input = form.querySelector('input[name=link]');
+  const errorSlot = form.querySelector('#openLinkError');
+  input.focus();
+
+  form.querySelector('#cancelOpenLink').addEventListener('click', () => {
+    slot.innerHTML = '';
+  });
+
+  // `navigator.clipboard.readText` no existe en todos los navegadores (en
+  // Safari solo dentro de un gesto del usuario, y en Firefox directamente
+  // no para páginas normales), así que el botón solo aparece si está y el
+  // formulario funciona igual pegando a mano.
+  const pasteBtn = form.querySelector('#pasteLinkBtn');
+  if (navigator.clipboard && navigator.clipboard.readText) {
+    pasteBtn.hidden = false;
+    pasteBtn.addEventListener('click', async () => {
+      try {
+        const text = await navigator.clipboard.readText();
+        if (text) {
+          input.value = text.trim();
+          errorSlot.innerHTML = '';
+        }
+      } catch (err) {
+        console.error(err); // permiso denegado: que lo pegue a mano
+        pasteBtn.hidden = true;
+      }
+    });
+  }
+
+  input.addEventListener('input', () => {
+    errorSlot.innerHTML = '';
+  });
+
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const target = parseSharedLink(input.value);
+    if (!target) {
+      errorSlot.innerHTML = '';
+      errorSlot.appendChild(
+        renderErrorBanner('Ese enlace no parece de un tablero. Cópialo entero, tal cual te lo pasaron.')
+      );
+      input.focus();
+      input.select();
+      return;
+    }
+    const param = target.kind === 'group' ? 'g' : 'b';
+    location.href = appUrl(`${param}=${encodeURIComponent(target.id)}`);
+  });
 }
 
 function renderCreateGroupForm(slot, store, profile) {
