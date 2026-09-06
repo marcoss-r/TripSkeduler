@@ -110,6 +110,15 @@ const SAVE_LABEL = {
   error: 'Sin guardar',
 };
 
+// Se guarda dos segundos después del último toque, no a cada toque: marcar
+// varios días seguidos es un solo gesto y debe ser una sola escritura. Para
+// que ese margen no pueda costar datos, `flushPendingSave` fuerza el guardado
+// en cuanto la app pasa a segundo plano o se cierra la pestaña.
+const SAVE_DELAY_MS = 2000;
+
+const SAVE_ERROR_HINT =
+  'No se ha podido guardar todavía. Lo que has marcado sigue aquí y se reintenta al tocar otro día.';
+
 const ALL_MONTHS = 'all';
 
 export async function renderBoard(app, board) {
@@ -123,6 +132,7 @@ export async function renderBoard(app, board) {
   let groupMembers = null; // solo si board.groupId; sirve para "quién falta por responder" (Fase 9)
   let essentials = { ...(board.essentials || {}) }; // uid -> true si es imprescindible; ausente = participante normal
   let pendingDays = null; // override optimista de mis propios días mientras el guardado está en curso
+  let savingDays = null; // el objeto exacto que se está escribiendo ahora mismo, o null
   let saveState = 'idle'; // idle | saving | saved | error
   let gotFirstSnapshot = false;
   let transientError = null;
@@ -143,27 +153,53 @@ export async function renderBoard(app, board) {
   app.innerHTML = '';
   app.appendChild(el('<div class="loading">Cargando tablero…</div>'));
 
-  const scheduleSave = debounce(async (name, days) => {
+  // Marcar días NUNCA toca la estructura de la página: el único sitio donde
+  // se cuenta si está guardado o no es el hueco fijo de `#saveState`. Un
+  // banner de error aquí sería justo lo contrario — aparece y desaparece
+  // con cada toque, y al hacerlo empuja el calendario hacia abajo.
+  const scheduleSave = debounce((name) => saveNow(name), SAVE_DELAY_MS);
+
+  /**
+   * Guarda `pendingDays`. Solo puede haber una escritura en vuelo: si llega
+   * otra petición mientras tanto, se ignora y es la que está en curso la que
+   * se reencadena al terminar, ya con el valor nuevo.
+   *
+   * ⚠️ `pendingDays` se limpia SOLO si sigue siendo exactamente el objeto que
+   * se acaba de guardar. Antes se ponía a null a secas, y ese era el fallo de
+   * "toco dos veces seguidas y vuelve el color de antes": el segundo toque
+   * dejaba un `pendingDays` nuevo que el final del primer guardado borraba,
+   * así que la casilla caía de vuelta al valor del servidor (el del primer
+   * toque) hasta que el segundo guardado terminaba.
+   */
+  async function saveNow(name) {
+    if (pendingDays === null || savingDays !== null) return;
+    const snapshot = pendingDays;
+    savingDays = snapshot;
     setSaveState('saving');
-    const hadError = transientError !== null;
     try {
-      await store.saveMyResponse(boardId, { name, days });
-      transientError = null;
+      await store.saveMyResponse(boardId, { name, days: snapshot });
+      if (pendingDays === snapshot) pendingDays = null;
       setSaveState('saved');
     } catch (err) {
       console.error(err);
-      transientError = 'No se pudo guardar tu disponibilidad. Vuelve a marcar el último día.';
+      // Sin banner: el hueco fijo ya dice "Sin guardar", y lo marcado se
+      // queda en pantalla (no se limpia `pendingDays`) para no dar por
+      // perdido lo que la persona acaba de hacer.
       setSaveState('error');
     } finally {
-      pendingDays = null; // ya coincide con lo persistido, o se reintentará con el próximo clic
-      // Solo se repinta entero si aparece o desaparece el aviso de error,
-      // que es lo único que cambia la estructura de la página. En el caso
-      // normal basta con reconciliar los datos en el sitio: así marcar un
-      // día no mueve nada de lo que hay alrededor.
-      if (hadError !== (transientError !== null)) draw();
-      else refreshLive();
+      savingDays = null;
+      refreshLive();
+      // Se tocó algo mientras se guardaba: va otra vuelta con lo último.
+      // Tras un fallo esto es además el reintento natural.
+      if (pendingDays !== null && pendingDays !== snapshot) saveNow(name);
     }
-  }, 400);
+  }
+
+  /** Fuerza el guardado pendiente sin esperar al debounce (al salir de la app). */
+  function flushPendingSave() {
+    scheduleSave.cancel();
+    saveNow(myResponse().name);
+  }
 
   function setSaveState(next) {
     saveState = next;
@@ -171,6 +207,10 @@ export async function renderBoard(app, board) {
     if (!node) return;
     node.className = `saveState ${next}`;
     node.textContent = SAVE_LABEL[next];
+    // La explicación del fallo va en el tooltip y no en un banner: un banner
+    // aquí cambiaría la altura de la cabecera y volvería a mover el
+    // calendario con cada toque, que es justo lo que se quiere evitar.
+    node.title = next === 'error' ? SAVE_ERROR_HINT : '';
   }
 
   function myResponse() {
@@ -269,15 +309,28 @@ export async function renderBoard(app, board) {
   window.addEventListener('pointerup', onPointerFinish);
   window.addEventListener('pointercancel', onPointerFinish);
 
+  // Salvavidas del retardo de SAVE_DELAY_MS: si la app se va a segundo plano
+  // o se cierra la pestaña con algo sin guardar, se escribe ya. En móvil
+  // 'visibilitychange' es el único que se dispara de forma fiable al cambiar
+  // de app o bloquear la pantalla; 'pagehide' cubre cerrar o navegar fuera.
+  function onHide() {
+    if (document.visibilityState === 'hidden') flushPendingSave();
+  }
+  document.addEventListener('visibilitychange', onHide);
+  window.addEventListener('pagehide', flushPendingSave);
+
   const previousCleanup = app._viewBoardCleanup;
   if (previousCleanup) previousCleanup();
   app._viewBoardCleanup = () => {
+    flushPendingSave();
     unsubscribe();
     unsubscribeBoard();
     if (unsubscribeMembers) unsubscribeMembers();
     window.removeEventListener('pointermove', onPointerMove);
     window.removeEventListener('pointerup', onPointerFinish);
     window.removeEventListener('pointercancel', onPointerFinish);
+    document.removeEventListener('visibilitychange', onHide);
+    window.removeEventListener('pagehide', flushPendingSave);
   };
 
   // --- "marcar rango" arrastrando (backlog Fase 12) --------------------------
@@ -318,7 +371,7 @@ export async function renderBoard(app, board) {
     applyDragPreview();
     // En cuanto se toca un día ya hay cambios sin guardar: decirlo aquí
     // evita que el hueco siga diciendo "Cambios guardados" durante los
-    // 400 ms de debounce, que sería mentira.
+    // SAVE_DELAY_MS de espera, que sería mentira.
     setSaveState('saving');
     refreshLive();
   }
@@ -335,12 +388,11 @@ export async function renderBoard(app, board) {
   function onDragEnd() {
     if (!dragging) return;
     dragging = false;
-    const finalDays = pendingDays;
     dragBaseDays = null;
     dragStartIdx = null;
     dragCurrentIdx = null;
     dragStatus = null;
-    scheduleSave(myResponse().name, finalDays);
+    scheduleSave(myResponse().name);
   }
 
   // `pointermove` no avisa de que el puntero ha entrado en otro elemento

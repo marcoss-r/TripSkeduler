@@ -527,7 +527,7 @@ Solo el flujo de **tablero suelto** (sin grupos ni "mis viajes" todavía).
     ("12 de julio: tú — disponible. Grupo: 3 completa · 1 parcial..."), no
     un `div` con `tabindex`.
   - **Estados**: cargando, error de red, tablero vacío, guardando (optimista).
-  - **Escrituras**: debounce ~400 ms para agrupar clics rápidos en un solo
+  - **Escrituras**: debounce de 2 s (era 400 ms) para agrupar clics rápidos en un solo
     `saveMyResponse`.
   - Fuera el enlace "Restablecer tablero" del pie: pasa a ser acción exclusiva
     del creador (Fase 5).
@@ -954,7 +954,7 @@ Después del STOP #2, también 5–11 salvo los tres STOPs intermedios.
 | **`credential-already-in-use` al vincular Google** | Flujo de fallback documentado en la sección 1.1; no se intenta fusión automática perfecta |
 | Perder el navegador = perder los viajes | Aviso explícito en la home + oferta de vincular Google |
 | Rutas absolutas rompen bajo `/TripSkeduler/` | Todo relativo; verificar en Fase 7 |
-| Escritura por clic → muchas escrituras Firestore | Debounce de 400 ms (Fase 3) |
+| Escritura por clic → muchas escrituras Firestore | Debounce de 2 s, con guardado forzado al pasar la app a segundo plano (Fase 3) |
 | Documento `days` crece sin control | Solo se guardan días ≠ `none`; tope 180 |
 | `users/{uid}/boards` desincronizado | Es un índice, no fuente de verdad; se ignoran las entradas rotas |
 | Reglas con `exists()`/`get()` cuestan lecturas | Solo en `create` de tablero de grupo y en borrados; despreciable |
