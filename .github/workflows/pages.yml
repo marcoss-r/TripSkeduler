@@ -30,6 +30,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/configure-pages@v5
+        with:
+          # Re-registra el sitio de Pages con build_type=workflow en cada
+          # despliegue. Si el sitio se quedó desconfigurado, deploy-pages
+          # sigue reportando éxito contra un sitio que nadie sirve — que es
+          # el único escenario que explica un 404 de GitHub con el artefacto
+          # subido correctamente.
+          enablement: true
       - uses: actions/upload-pages-artifact@v3
         with:
           path: tablero-viaje-grupal/app
