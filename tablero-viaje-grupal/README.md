@@ -20,7 +20,15 @@ la mejor ventana de días consecutivos para todo el grupo.
   (amarillo), no disponible (rojo) y no definido/sin marcar (gris, el
   estado por defecto).
 - **Cálculo automático de la mejor ventana** de N días consecutivos
-  (duración del viaje) según la disponibilidad agregada del grupo.
+  (duración del viaje) según la disponibilidad agregada del grupo, más las
+  2 siguientes mejores ventanas alternativas (no solapadas con la
+  principal).
+- **Marcar varios días a la vez**: arrastra el ratón sobre el calendario
+  para pintar un rango entero con un solo estado, en vez de ir día a día
+  (en móvil se sigue tocando casilla a casilla).
+- **Ponderar participantes**: el creador del tablero puede marcar a
+  alguien como "cuenta doble" en la puntuación (por ejemplo, la persona
+  sin la que el viaje no tiene sentido).
 - **Identidad sin fricción, en 3 niveles**: anónimo (automático), con
   perfil (solo escribes tu nombre una vez) y, opcionalmente, con cuenta de
   Google para tener tus viajes en todos tus dispositivos. Nunca hace falta
@@ -88,6 +96,11 @@ funcionar con datos reales y compartidos entre dispositivos.
    producción con `auth/unauthorized-domain`; el anónimo funciona igual).
 5. (Opcional, recomendado) restringir la API key de Firebase a tu dominio
    de Pages y a `localhost` en [Google Cloud Console → Credenciales](https://console.cloud.google.com/apis/credentials).
+6. (Opcional) borrado automático de tableros sin actividad: **Firestore
+   Database → pestaña TTL → Crear política** sobre la colección `boards`,
+   campo `expiresAt`. La app ya escribe ese campo (8 meses desde la
+   creación o desde la última respuesta); sin esta política, simplemente
+   no se borra nada.
 
 ## Modelo de datos (Firestore)
 
@@ -100,7 +113,8 @@ groups/{groupId}                     name, ownerUid
 groups/{groupId}/members/{uid}       name, joinedAt
 
 boards/{boardId}                     tripName, startDate, endDate,
-                                      tripLength, groupId (o null), ownerUid
+                                      tripLength, groupId (o null), ownerUid,
+                                      expiresAt (borrado automático), weights (ponderar)
 boards/{boardId}/responses/{uid}     name, days: { "YYYY-MM-DD": estado }
 ```
 

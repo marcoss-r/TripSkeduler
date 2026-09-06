@@ -192,6 +192,10 @@ boards/{boardId}
   groupId:    string | null              # null = tablero suelto
   ownerUid:   string
   createdAt:  timestamp
+  expiresAt:  timestamp                  # borrado automático (backlog); se fija al
+                                          # crear y se empuja 8 meses hacia adelante
+                                          # con cada respuesta guardada — ver sección 6, Fase 12
+  weights:    map { uid: number } | ausente  # backlog: "cuenta doble"; ausente == 1 para todos
 
 boards/{boardId}/responses/{uid}         ← el docId ES el uid
   name:      string   (1..40)
@@ -283,7 +287,7 @@ service cloud.firestore {
 
       allow create: if isSignedIn()
         && request.resource.data.keys().hasOnly(
-             ['tripName','startDate','endDate','tripLength','groupId','ownerUid','createdAt'])
+             ['tripName','startDate','endDate','tripLength','groupId','ownerUid','createdAt','expiresAt','weights'])
         && str(request.resource.data.tripName, 1, 80)
         && isDate(request.resource.data.startDate)
         && isDate(request.resource.data.endDate)
@@ -295,7 +299,19 @@ service cloud.firestore {
         && (request.resource.data.groupId == null
             || isGroupMember(request.resource.data.groupId));
 
-      allow update, delete: if isSignedIn() && resource.data.ownerUid == me();
+      // El dueño edita cualquier campo (nombre/fechas, Fase 5; `weights`,
+      // backlog Fase 12). Cualquier persona autenticada puede, además,
+      // EXCLUSIVAMENTE empujar `expiresAt` hacia delante — así se marca
+      // "actividad" para el TTL sin que solo el dueño pueda mantener vivo
+      // su propio tablero.
+      allow update: if isSignedIn() && (
+        resource.data.ownerUid == me()
+        || (
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['expiresAt'])
+          && request.resource.data.expiresAt is timestamp
+        )
+      );
+      allow delete: if isSignedIn() && resource.data.ownerUid == me();
 
       match /responses/{uid} {
         allow read: if true;
@@ -689,17 +705,28 @@ Acción **A6**.
 
 ### Fase 12 — Backlog (solo bajo petición explícita)
 
-No lo hagas por iniciativa propia:
+No lo hagas por iniciativa propia salvo que se pida explícitamente (como
+ocurrió con los 4 primeros ítems, ya hechos):
 
-- Top-3 ventanas alternativas (`topWindows` ya estará hecha).
+- ✅ Top-3 ventanas alternativas (`topWindows` + sección "Otras ventanas
+  posibles" bajo la mejor ventana, en `view-board.js`).
+- ✅ "Marcar rango" arrastrando en vez de clic día a día (mousedown +
+  mouseenter + mouseup global sobre el calendario; solo ratón — en móvil
+  se sigue tocando día a día).
+- ✅ Ponderar participantes: el dueño marca a alguien como "cuenta doble"
+  (`boards/{id}.weights`); afecta solo a `computeScores`, nunca al
+  desglose de disponibilidad por persona.
+- ✅ Borrado automático de tableros sin actividad — implementado como TTL
+  de Firestore, no como código propio: `boards/{id}.expiresAt` se fija al
+  crear (8 meses vista) y se empuja otros 8 meses con cada respuesta
+  guardada. **Necesita una acción manual de Marcos para activarse de
+  verdad** — ver acción **A8** en la sección 7. Sin esa política de TTL
+  configurada, el campo se escribe pero no borra nada por sí solo
+  (inofensivo, no bloquea nada mientras tanto).
 - Exportar la ventana ganadora a `.ics` / Google Calendar.
-- "Marcar rango" arrastrando en vez de clic día a día.
-- Ponderar participantes (alguien imprescindible cuenta doble).
 - Fecha límite de respuesta y recordatorio de quién falta.
 - PWA instalable + notificaciones push al grupo.
 - Modo claro. i18n es/en.
-- Borrado automático de tableros con > 12 meses sin actividad (TTL de
-  Firestore) para no acumular basura.
 
 ---
 
@@ -832,6 +859,27 @@ porque después cuesta más:
 
 ---
 
+### A8 · Activar el borrado automático de tableros (opcional, 2 min)
+
+Backlog Fase 12: `boards/{id}.expiresAt` ya se escribe (8 meses desde la
+creación o desde la última respuesta guardada), pero **nada lo borra**
+hasta que actives la política de TTL — Firestore no la expone por API,
+solo por consola/gcloud, así que esto es cosa tuya:
+
+1. Consola de Firebase → **Firestore Database** → pestaña **TTL** (o
+   "Time-to-live" según el idioma de la consola).
+2. **Crear política** → colección `boards` → campo `expiresAt`.
+3. Guardar.
+
+Firestore revisa y borra los documentos caducados en un plazo de hasta 72
+horas tras cumplirse `expiresAt` — no es instantáneo, es normal que un
+tablero "caducado" tarde uno o dos días en desaparecer.
+
+**Confírmame:** "TTL activado" (o "lo dejo para luego" — mientras tanto no
+pasa nada, los tableros simplemente no caducan).
+
+---
+
 ## 8. Resumen de paradas
 
 | # | Fase | Bloqueante | Qué necesito de ti |
@@ -841,6 +889,7 @@ porque después cuesta más:
 | 3 | Fin de Fase 6 | **Sí** | Publicar reglas (A2) + API key (A3) |
 | 4 | Fin de Fase 7 | **Sí** | Activar Pages (A4) + dominio Auth (A5) |
 | 5 | Fin de Fase 11 | **Sí** | Probar con el grupo (A6) |
+| 6 | Backlog (Fase 12) | No | Activar TTL en Firestore para el borrado automático (A8) — opcional, nada se rompe si no lo haces |
 
 **Fases que Sonnet puede hacer del tirón sin molestarte: 0, 1, 2 y 3.**
 Después del STOP #2, también 5–11 salvo los tres STOPs intermedios.

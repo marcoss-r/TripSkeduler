@@ -55,7 +55,7 @@ service cloud.firestore {
 
       allow create: if isSignedIn()
         && request.resource.data.keys().hasOnly(
-             ['tripName','startDate','endDate','tripLength','groupId','ownerUid','createdAt'])
+             ['tripName','startDate','endDate','tripLength','groupId','ownerUid','createdAt','expiresAt','weights'])
         && str(request.resource.data.tripName, 1, 80)
         && isDate(request.resource.data.startDate)
         && isDate(request.resource.data.endDate)
@@ -67,7 +67,21 @@ service cloud.firestore {
         && (request.resource.data.groupId == null
             || isGroupMember(request.resource.data.groupId));
 
-      allow update, delete: if isSignedIn() && resource.data.ownerUid == me();
+      // El dueño puede editar cualquier campo (nombre/fechas — Fase 5 — y
+      // `weights`, ponderar participantes — backlog Fase 12). Cualquier
+      // persona autenticada puede, además, EXCLUSIVAMENTE empujar
+      // `expiresAt` hacia adelante: es como se marca "actividad" para el
+      // borrado automático por TTL (ver firestore-store.js) sin dar al
+      // dueño en exclusiva la capacidad de "salvar" su propio tablero de
+      // caducar con cada visita de cualquier participante.
+      allow update: if isSignedIn() && (
+        resource.data.ownerUid == me()
+        || (
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['expiresAt'])
+          && request.resource.data.expiresAt is timestamp
+        )
+      );
+      allow delete: if isSignedIn() && resource.data.ownerUid == me();
 
       match /responses/{uid} {
         allow read: if true;

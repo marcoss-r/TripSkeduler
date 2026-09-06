@@ -193,6 +193,30 @@ export async function createFirestoreStore(firebaseConfig) {
   }
 
   // --- tableros ---------------------------------------------------------
+  //
+  // Borrado automático de tableros sin actividad (backlog, Fase 12): cada
+  // tablero lleva un campo `expiresAt` que se fija al crearlo y se AMPLÍA
+  // (se empuja BOARD_TTL_MONTHS meses hacia adelante) cada vez que alguien
+  // guarda una respuesta — así un tablero solo "caduca" si nadie lo toca en
+  // todo ese tiempo. El borrado en sí no lo hace esta app: lo hace Firestore
+  // solo, mediante una política de TTL configurada en la consola sobre este
+  // campo (acción manual de Marcos, PLAN-DESARROLLO.md sección 7 — Firestore
+  // no expone esa configuración por API, solo por consola/gcloud). Sin esa
+  // política configurada, `expiresAt` se escribe igualmente pero no borra
+  // nada por sí solo: es inofensivo dejarlo así mientras tanto.
+  //
+  // Solo borra el documento `boards/{boardId}`, NO su subcolección
+  // `responses` (las políticas de TTL de Firestore no son recursivas): esos
+  // documentos quedan huérfanos pero inaccesibles en la práctica (nadie
+  // conoce ya el link), mismo criterio de "índice desincronizado aceptado"
+  // que el resto del plan.
+  const BOARD_TTL_MONTHS = 8;
+
+  function boardExpiresAt() {
+    const d = new Date();
+    d.setMonth(d.getMonth() + BOARD_TTL_MONTHS);
+    return d; // el SDK de Firestore convierte un Date nativo a Timestamp al escribir
+  }
 
   async function createBoard(config) {
     const boardId = await ensureUniqueId('boards', () => newId(10));
@@ -201,6 +225,7 @@ export async function createFirestoreStore(firebaseConfig) {
       groupId: config.groupId ?? null,
       ownerUid: myUid(),
       createdAt: serverTimestamp(),
+      expiresAt: boardExpiresAt(),
     });
     return boardId;
   }
@@ -245,6 +270,15 @@ export async function createFirestoreStore(firebaseConfig) {
       name,
       days,
       updatedAt: serverTimestamp(),
+    });
+    // Cualquier respuesta cuenta como actividad del tablero: empuja su
+    // caducidad BOARD_TTL_MONTHS meses más — ver la nota junto a
+    // createBoard. Esta escritura es best-effort: no toques nada si falla
+    // (p. ej. un tablero MUY antiguo creado antes de que existiera este
+    // campo, o un corte de red puntual); la respuesta de arriba, que es lo
+    // que de verdad importa al usuario, ya se guardó.
+    updateDoc(doc(db, 'boards', boardId), { expiresAt: boardExpiresAt() }).catch((err) => {
+      console.warn('No se pudo renovar la caducidad del tablero:', err);
     });
   }
 

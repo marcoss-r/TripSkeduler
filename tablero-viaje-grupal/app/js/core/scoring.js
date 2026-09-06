@@ -1,6 +1,7 @@
 // Lógica de puntuación y búsqueda de la mejor ventana — módulo puro.
 // Copiada del prototipo (computeScores, bestWindow) y ampliada con
-// topWindows para el backlog (Fase 12: top-3 ventanas alternativas).
+// topWindows (top-3 ventanas alternativas) y con ponderación de
+// participantes (backlog, Fase 12).
 //
 // Cuatro estados por día y persona:
 //   - 'none'        no definido (por defecto, antes de marcar nada)
@@ -19,8 +20,14 @@ const SCORE = { none: 0, unavailable: 0, partial: 0.5, full: 1 };
  * Para cada fecha del rango, suma la puntuación de todas las respuestas
  * y cuenta cuántas fueron de cada estado.
  *
+ * `weight` (opcional, por defecto 1) pondera cuánto cuenta el voto de esa
+ * persona en `scores` — "alguien imprescindible cuenta doble" (backlog,
+ * Fase 12). Solo afecta a `scores`; `breakdown` sigue siendo un recuento de
+ * PERSONAS (no de puntos), para que el desglose ("3 disponibles") siga
+ * significando lo que dice aunque alguien cuente doble en la puntuación.
+ *
  * @param {string[]} dates - fechas "YYYY-MM-DD" del rango
- * @param {Array<{days: Record<string,string>}>} responses
+ * @param {Array<{days: Record<string,string>, weight?: number}>} responses
  * @returns {{scores: Record<string,number>, breakdown: Record<string,{full:number,partial:number,unavailable:number,none:number}>}}
  */
 export function computeScores(dates, responses) {
@@ -31,9 +38,10 @@ export function computeScores(dates, responses) {
     breakdown[d] = { full: 0, partial: 0, unavailable: 0, none: 0 };
   }
   for (const r of responses) {
+    const weight = r.weight > 0 ? r.weight : 1;
     for (const d of dates) {
       const st = (r.days && r.days[d]) || 'none';
-      scores[d] += SCORE[st];
+      scores[d] += SCORE[st] * weight;
       breakdown[d][st]++;
     }
   }

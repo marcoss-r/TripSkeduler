@@ -35,6 +35,27 @@ test('computeScores con cero participantes: todas las puntuaciones a 0', () => {
   }
 });
 
+test('computeScores pondera con `weight` (backlog: participante que cuenta doble)', () => {
+  const responses = [
+    { days: { '2026-07-01': 'full' }, weight: 2 }, // cuenta doble -> 2 puntos
+    { days: { '2026-07-01': 'partial' } }, // weight por defecto 1 -> 0.5 puntos
+  ];
+  const { scores, breakdown } = computeScores(DATES, responses);
+  assert.equal(scores['2026-07-01'], 2.5);
+  // breakdown sigue siendo un recuento de personas, no de puntos ponderados.
+  assert.deepEqual(breakdown['2026-07-01'], { full: 1, partial: 1, unavailable: 0, none: 0 });
+});
+
+test('computeScores trata weight ausente, 0 o negativo como 1 (nunca anula ni resta)', () => {
+  const responses = [
+    { days: { '2026-07-01': 'full' }, weight: 0 },
+    { days: { '2026-07-02': 'full' }, weight: -1 },
+  ];
+  const { scores } = computeScores(DATES, responses);
+  assert.equal(scores['2026-07-01'], 1);
+  assert.equal(scores['2026-07-02'], 1);
+});
+
 test('bestWindow elige la ventana de mayor puntuación total', () => {
   const responses = [
     {

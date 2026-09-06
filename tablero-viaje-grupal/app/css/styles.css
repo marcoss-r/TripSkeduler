@@ -98,6 +98,11 @@ button.calDay:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px
   .calDayBadge { font-size: 9px; }
 }
 
+/* "Marcar rango" arrastrando (backlog Fase 12): evita que el navegador
+   seleccione el texto de las casillas como si fuera texto normal mientras
+   se arrastra el ratón sobre ellas. */
+.calDays { user-select: none; }
+
 /* Lista compacta de participantes bajo el calendario */
 .roster { display: flex; flex-direction: column; gap: 8px; margin-top: 20px; }
 .rosterRow { display: flex; justify-content: space-between; align-items: center; font-size: 13px; padding: 8px 12px; background: var(--panel); border-radius: 8px; }
@@ -106,6 +111,14 @@ button.calDay:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px
 .rosterName.mine { color: var(--highlight); }
 .rosterStats { color: var(--ink-dim); font-family: 'IBM Plex Mono', monospace; font-size: 12px; }
 .rosterRight { display: flex; align-items: center; gap: 10px; }
+
+/* Ponderar participantes (backlog Fase 12): "cuenta doble" */
+.weightBadge { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--highlight); border: 1px solid var(--highlight); border-radius: 4px; padding: 1px 4px; margin-left: 4px; vertical-align: middle; }
+
+/* Top-3 ventanas alternativas (backlog Fase 12) */
+.altWindows { margin-top: 4px; }
+.altRow { display: flex; justify-content: space-between; font-size: 13px; padding: 8px 12px; color: var(--ink-dim); border-bottom: 1px solid rgba(255,255,255,0.06); }
+.altScore { font-family: 'IBM Plex Mono', monospace; font-size: 12px; }
 
 /* Barra y acciones de creador del tablero (Fase 5) */
 button.ghost.danger { border-color: var(--danger); color: var(--danger); }

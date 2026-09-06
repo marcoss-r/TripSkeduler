@@ -19,10 +19,26 @@
 // deleteResponse de la interfaz de store; borrar el tablero pide
 // confirmación doble (dos `confirm()` con mensajes distintos) por ser
 // irreversible y afectar a todo el grupo, no solo a quien pulsa el botón.
+//
+// Backlog (Fase 12), añadido a petición explícita:
+// - "Marcar rango" arrastrando: mousedown en un día + arrastrar + soltar
+//   pinta todo el rango recorrido con el mismo estado (el siguiente en el
+//   ciclo respecto al día donde empezó el arrastre). Un simple clic sin
+//   arrastrar es un caso particular (rango de un solo día) — es el mismo
+//   mecanismo de antes, no un modo aparte. Solo con ratón: en móvil no hay
+//   `mouseenter` al arrastrar el dedo, así que ahí se sigue tocando día a
+//   día (los eventos de ratón "sintéticos" que sí dispara un tap dan un
+//   rango de 1 día, o sea el ciclo normal).
+// - Ponderar participantes: el dueño puede marcar a alguien como "cuenta
+//   doble" (`board.weights[uid] = 2`); solo afecta a la puntuación de
+//   `computeScores`, nunca al desglose de disponibilidad por persona.
+// - Top-3 ventanas alternativas (topWindows, ya existía en scoring.js):
+//   se muestran las dos siguientes mejores ventanas no solapadas con la
+//   principal.
 
 import { getStore } from '../data/store.js';
 import { dateRangeArray, isValidRange, MAX_RANGE_DAYS, monthShort, dayNum, groupByMonth, mondayIndex } from '../core/dates.js';
-import { computeScores, bestWindow } from '../core/scoring.js';
+import { computeScores, bestWindow, topWindows } from '../core/scoring.js';
 import { el, debounce, renderErrorBanner, appUrl } from './components.js';
 
 // Orden del ciclo al hacer clic: empieza en "no definido" (el estado por
@@ -51,12 +67,21 @@ export async function renderBoard(app, board) {
 
   let responses = [];
   let groupMembers = null; // solo si board.groupId; sirve para "quién falta por responder" (Fase 9)
+  let weights = { ...(board.weights || {}) }; // uid -> 2 si "cuenta doble" (backlog Fase 12); ausente = 1
   let pendingDays = null; // override optimista de mis propios días mientras el guardado está en curso
   let saving = false;
   let gotFirstSnapshot = false;
   let transientError = null;
   let editingBoard = false;
   let boardBusy = false; // deshabilita las acciones de creador mientras hay una escritura en curso
+
+  // Estado del arrastre "marcar rango" (backlog Fase 12) — ver la nota del
+  // encabezado del fichero.
+  let dragging = false;
+  let dragBaseDays = null; // mis días ANTES de empezar el arrastre actual
+  let dragStartIdx = null;
+  let dragCurrentIdx = null;
+  let dragStatus = null;
 
   app.innerHTML = '';
   app.appendChild(el('<div class="loading">Cargando tablero…</div>'));
@@ -92,6 +117,11 @@ export async function renderBoard(app, board) {
     return responses.map((r) => (r.uid === myUid ? { ...r, days: pendingDays } : r));
   }
 
+  /** `currentResponses` con el campo `weight` añadido, solo para pasar a computeScores (backlog: ponderar participantes). */
+  function weightedResponses(currentResponses) {
+    return currentResponses.map((r) => ({ ...r, weight: weights[r.uid] || 1 }));
+  }
+
   const unsubscribe = store.subscribeResponses(boardId, (r) => {
     responses = r;
     gotFirstSnapshot = true;
@@ -108,21 +138,77 @@ export async function renderBoard(app, board) {
   // debería pasar en el flujo normal de main.js, pero es una salvaguarda
   // barata), se limpia la suscripción anterior antes de dejar activa la
   // nueva.
+  window.addEventListener('mouseup', onDragEnd);
+
   const previousCleanup = app._viewBoardCleanup;
   if (previousCleanup) previousCleanup();
   app._viewBoardCleanup = () => {
     unsubscribe();
     if (unsubscribeMembers) unsubscribeMembers();
+    window.removeEventListener('mouseup', onDragEnd);
   };
 
-  function onCycle(day) {
-    const order = STATUS_ORDER;
-    const current = myDays()[day] || 'none';
-    const next = order[(order.indexOf(current) + 1) % order.length];
-    const updated = { ...myDays(), [day]: next };
+  // --- "marcar rango" arrastrando (backlog Fase 12) --------------------------
+  //
+  // dragStart fija, sobre el día donde empieza el arrastre, cuál es el
+  // "siguiente estado" a aplicar (mismo ciclo que un clic normal) y lo
+  // recuerda en dragStatus para todo el arrastre — así se pinta el rango
+  // entero con UN estado, no se re-cicla casilla a casilla. dragEnter va
+  // recalculando el rango [inicio, actual] sobre el índice en `dates` (no
+  // sobre el orden en que el ratón disparó los eventos), para no perder
+  // días si el cursor se mueve rápido y se salta alguna casilla. Un clic
+  // simple es el caso degenerado: mousedown+mouseup sin ningún mouseenter
+  // de por medio, rango de longitud 1 — el mismo resultado que el ciclo de
+  // toda la vida.
+
+  function dragRangeDates() {
+    const lo = Math.min(dragStartIdx, dragCurrentIdx);
+    const hi = Math.max(dragStartIdx, dragCurrentIdx);
+    return dates.slice(lo, hi + 1);
+  }
+
+  function applyDragPreview() {
+    const updated = { ...dragBaseDays };
+    for (const d of dragRangeDates()) updated[d] = dragStatus;
     pendingDays = updated;
+  }
+
+  function onDragStart(day) {
+    if (dragging) return;
+    dragging = true;
+    dragBaseDays = { ...myDays() };
+    dragStartIdx = dates.indexOf(day);
+    dragCurrentIdx = dragStartIdx;
+    const current = dragBaseDays[day] || 'none';
+    dragStatus = STATUS_ORDER[(STATUS_ORDER.indexOf(current) + 1) % STATUS_ORDER.length];
+    applyDragPreview();
     draw();
-    scheduleSave(myResponse().name, updated);
+  }
+
+  function onDragEnter(day) {
+    if (!dragging) return;
+    const idx = dates.indexOf(day);
+    // Guarda importante: draw() destruye y reconstruye todas las casillas,
+    // así que el navegador vuelve a disparar `mouseenter` sobre la casilla
+    // recién creada que queda bajo un cursor que ni se ha movido — sin este
+    // corte de caso ("misma casilla que ya teníamos") eso realimenta un
+    // draw() tras otro sin fin (comprobado con Playwright: el calendario
+    // quedaba redibujándose para siempre en cuanto empezaba un arrastre).
+    if (idx === dragCurrentIdx) return;
+    dragCurrentIdx = idx;
+    applyDragPreview();
+    draw();
+  }
+
+  function onDragEnd() {
+    if (!dragging) return;
+    dragging = false;
+    const finalDays = pendingDays;
+    dragBaseDays = null;
+    dragStartIdx = null;
+    dragCurrentIdx = null;
+    dragStatus = null;
+    scheduleSave(myResponse().name, finalDays);
   }
 
   function toggleEditBoard() {
@@ -189,6 +275,30 @@ export async function renderBoard(app, board) {
     }
   }
 
+  /** Ponderar participantes (backlog Fase 12): alterna entre peso 1 y 2 ("cuenta doble") para un participante. */
+  async function onToggleWeight(uid) {
+    const next = (weights[uid] || 1) === 2 ? 1 : 2;
+    const updated = { ...weights };
+    if (next === 1) delete updated[uid]; // no acumular basura: ausente == 1
+    else updated[uid] = next;
+
+    const previous = weights;
+    weights = updated;
+    boardBusy = true;
+    draw();
+    try {
+      await store.updateBoard(boardId, { weights: updated });
+      transientError = null;
+    } catch (err) {
+      console.error(err);
+      weights = previous;
+      transientError = 'No se pudo actualizar la ponderación. Inténtalo de nuevo.';
+    } finally {
+      boardBusy = false;
+      draw();
+    }
+  }
+
   async function onRemoveParticipant(uid, name) {
     if (!confirm(`¿Quitar a ${name} del tablero? Perderá su disponibilidad marcada.`)) return;
 
@@ -210,8 +320,9 @@ export async function renderBoard(app, board) {
     if (!gotFirstSnapshot) return; // se queda con el "Cargando tablero…" hasta el primer snapshot
 
     const currentResponses = effectiveResponses();
-    const { scores, breakdown } = computeScores(dates, currentResponses);
+    const { scores, breakdown } = computeScores(dates, weightedResponses(currentResponses));
     const best = bestWindow(dates, scores, breakdown, board.tripLength);
+    const top = topWindows(dates, scores, breakdown, board.tripLength, 3);
 
     app.innerHTML = '';
     const container = el(`<div class="wrap wide">
@@ -237,10 +348,11 @@ export async function renderBoard(app, board) {
         <span><i class="dot partial"></i>Parcial</span>
         <span><i class="dot unavailable"></i>No disponible</span>
         <span><i class="dot none"></i>No definido</span>
-        <span>· el número bajo cada día es la puntuación del grupo</span>
+        <span>· el número bajo cada día es la puntuación del grupo · arrastra sobre varios días para marcarlos a la vez</span>
       </div>
       <div class="calendar"></div>
       <div class="bestBox"></div>
+      <div class="altWindows"></div>
       <div class="roster"></div>
       ${store.kind === 'local'
         ? '<p class="footNote">Estos datos se guardan en este navegador (modo local de desarrollo) mientras no se conecte un backend real.</p>'
@@ -275,6 +387,7 @@ export async function renderBoard(app, board) {
 
     drawCalendar(container.querySelector('.calendar'), { dates, scores, breakdown, best });
     drawBestBox(container.querySelector('.bestBox'), { best, responses: currentResponses });
+    drawAlternatives(container.querySelector('.altWindows'), { top });
     drawRoster(container.querySelector('.roster'), { dates, responses: currentResponses, myUid });
   }
 
@@ -350,24 +463,53 @@ export async function renderBoard(app, board) {
         ${badge ? `<span class="calDayBadge">${badge}</span>` : ''}
       </button>`
     );
-    btn.addEventListener('click', () => onCycle(day));
+    // mousedown+mouseenter+mouseup(global), no click: así un arrastre pinta
+    // todo el rango con un solo estado en vez de ciclar casilla a casilla.
+    // Un clic normal (sin arrastrar) es un rango de 1 día — mismo resultado
+    // de siempre. Ver la nota de cabecera del fichero sobre por qué no hay
+    // soporte de arrastre táctil.
+    btn.addEventListener('mousedown', (e) => {
+      e.preventDefault(); // evita selección de texto nativa al arrastrar
+      onDragStart(day);
+    });
+    btn.addEventListener('mouseenter', () => onDragEnter(day));
     return btn;
   }
 
   function drawBestBox(bestBox, { best, responses: currentResponses }) {
     if (best) {
+      const totalWeight = currentResponses.reduce((sum, r) => sum + (weights[r.uid] || 1), 0);
       bestBox.innerHTML = `
         <div class="eyebrow">MEJOR VENTANA · ${board.tripLength} DÍAS</div>
         <div class="bestDates">${monthShort(best.start)} ${dayNum(best.start)} — ${monthShort(best.end)} ${dayNum(best.end)}</div>
-        <div class="bestMeta">Puntuación ${formatScore(best.sum)} de ${board.tripLength * currentResponses.length} máx. · ${best.fullCount} disponibilidades completas</div>`;
+        <div class="bestMeta">Puntuación ${formatScore(best.sum)} de ${board.tripLength * totalWeight} máx. · ${best.fullCount} disponibilidades completas</div>`;
     } else {
       bestBox.innerHTML = `<p class="sub" style="margin:0;">El rango de fechas es más corto que la duración del viaje.</p>`;
+    }
+  }
+
+  /** Top-3 ventanas alternativas (backlog Fase 12): se omite la [0], que ya se muestra en drawBestBox. */
+  function drawAlternatives(altBox, { top }) {
+    const alternatives = top.slice(1);
+    if (alternatives.length === 0) {
+      altBox.innerHTML = '';
+      return;
+    }
+    altBox.innerHTML = '<div class="eyebrow" style="margin-top:20px;">OTRAS VENTANAS POSIBLES</div>';
+    for (const w of alternatives) {
+      altBox.appendChild(
+        el(`<div class="altRow">
+          <span>${monthShort(w.start)} ${dayNum(w.start)} — ${monthShort(w.end)} ${dayNum(w.end)}</span>
+          <span class="altScore">Puntuación ${formatScore(w.sum)}</span>
+        </div>`)
+      );
     }
   }
 
   function drawRoster(rosterEl, { dates, responses: currentResponses, myUid }) {
     for (const r of currentResponses) {
       const isMine = r.uid === myUid;
+      const weight = weights[r.uid] || 1;
       let full = 0;
       let partial = 0;
       let unavailable = 0;
@@ -378,12 +520,18 @@ export async function renderBoard(app, board) {
         else if (st === 'unavailable') unavailable++;
       }
       const row = el(`<div class="rosterRow ${isMine ? 'mine' : ''}">
-          <span class="rosterName ${isMine ? 'mine' : ''}">${escapeHtml(r.name)}${isMine ? ' (tú)' : ''}</span>
+          <span class="rosterName ${isMine ? 'mine' : ''}">${escapeHtml(r.name)}${isMine ? ' (tú)' : ''}${
+            weight === 2 ? ' <span class="weightBadge" title="Cuenta doble en la puntuación">×2</span>' : ''
+          }</span>
           <span class="rosterRight">
             <span class="rosterStats">${full} disponible${full === 1 ? '' : 's'} · ${partial} parcial${partial === 1 ? '' : 'es'} · ${unavailable} no disponible${unavailable === 1 ? '' : 's'}</span>
+            ${isOwner ? `<button type="button" class="ghost small weightBtn" ${boardBusy ? 'disabled' : ''}>${weight === 2 ? 'Cuenta doble ✓' : 'Cuenta doble'}</button>` : ''}
             ${isOwner && !isMine ? '<button type="button" class="ghost small danger removeBtn">Quitar</button>' : ''}
           </span>
         </div>`);
+      if (isOwner) {
+        row.querySelector('.weightBtn').addEventListener('click', () => onToggleWeight(r.uid));
+      }
       if (isOwner && !isMine) {
         row.querySelector('.removeBtn').addEventListener('click', () => onRemoveParticipant(r.uid, r.name));
       }
